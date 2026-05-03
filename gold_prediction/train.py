@@ -250,19 +250,6 @@ for lag in [1, 2, 3, 5, 10]:
 
 df['log_return'] = df['log_Gold'].diff()
 
-# Multi-period momentum features
-for period in [21, 63, 126, 252]:
-    df[f'gold_ret_{period}d'] = df['log_Gold'].diff(period)
-
-# Month-of-year dummies (gold documented seasonal patterns)
-for m_num in range(1, 13):
-    df[f'month_{m_num}'] = (df.index.month == m_num).astype(int)
-
-# COT 20-day position changes (captures slower buildup vs existing 5-day)
-if HAS_COT:
-    df['net_spec_chg_20d'] = df['net_speculator'].diff(20)
-    df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
-
 df.dropna(inplace=True)
 print(f'  Feature matrix: {df.shape[0]} rows × {df.shape[1]} cols')
 _elapsed('3. Feature engineering', t0)
@@ -294,12 +281,8 @@ _ta_feats = [
     'MACD_diff', 'BB_width', 'BB_pct',
 ]
 _lag_feats      = [f'target_lag{l}' for l in [1, 2, 3, 5, 10]]
-_momentum_feats = [f'gold_ret_{p}d' for p in [21, 63, 126, 252]]
-_month_feats    = [f'month_{m}' for m in range(1, 13)]
-_cot20_feats    = (['net_spec_chg_20d', 'net_comm_chg_20d'] if HAS_COT else [])
 
-FEATURE_COLS = [c for c in (_cot_feats + _macro_feats + _ta_feats + _lag_feats
-                             + _momentum_feats + _month_feats + _cot20_feats)
+FEATURE_COLS = [c for c in (_cot_feats + _macro_feats + _ta_feats + _lag_feats)
                 if c in df.columns]
 assert TARGET not in FEATURE_COLS, 'LEAKAGE!'
 

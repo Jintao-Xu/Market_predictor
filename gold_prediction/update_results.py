@@ -164,19 +164,6 @@ for lag in [1, 2, 3, 5, 10]:
     df[f'target_lag{lag}'] = df['frac_diff_log_Gold'].shift(lag)
 df['log_return'] = df['log_Gold'].diff()
 
-# Multi-period momentum features (must match train.py)
-for period in [21, 63, 126, 252]:
-    df[f'gold_ret_{period}d'] = df['log_Gold'].diff(period)
-
-# Month-of-year dummies (gold seasonal patterns)
-for m_num in range(1, 13):
-    df[f'month_{m_num}'] = (df.index.month == m_num).astype(int)
-
-# COT 20-day position changes
-if HAS_COT:
-    df['net_spec_chg_20d'] = df['net_speculator'].diff(20)
-    df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
-
 df.dropna(inplace=True)
 
 FEATURE_COLS = [c for c in FEATURE_COLS if c in df.columns]
