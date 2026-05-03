@@ -227,6 +227,46 @@ active = sig != 0
 
 ---
 
+## Grid Boundary Analysis — `exp/combined-best` best params
+
+After Exp 7, each model's best params were checked against its search grid boundaries.
+A boundary hit means the optimum may lie outside the tested range.
+
+| Model | Best Param | Boundary? | Action |
+|---|---|---|---|
+| SVR_lin | C=1000 | UPPER — max of [0.01…1000] | Extend to [1000, 5000, 10000] |
+| Ridge | alpha=100 | UPPER — max of [0.0001…100] | Extend to [100, 500, 1000] |
+| SVR_rbf | C=0.01, gamma=0.001 | BOTH LOWER — min of each range | Extend C to [0.001, 0.01], gamma to [0.0001, 0.001] |
+| LightGBM | lr=0.01, n_est=300, leaves=15 | 3 boundaries — lower, upper, lower | lr→[0.005, 0.01], n_est→[300, 500], leaves→[7, 15] |
+| MLP | hidden=(128,64,32) | UPPER — largest in grid | Add (256,128,64) |
+| XGBoost | max_depth=2 | lower of [2,3,4,5] | Skip — depth=1 = stumps, unlikely to help |
+| RandomForest | min_samples_leaf=1, min_samples_split=2 | both lower | Skip — minimum-regularization values, already optimal direction |
+| ElasticNet | l1_ratio=0.1 | LOWER min of [0.1…0.9] | Skip — toward 0 = Ridge territory, already covered |
+| Lasso | alpha=0.001 | middle of range | Nothing to do |
+
+**5 models need grid extensions (SVR_lin, Ridge, SVR_rbf, LightGBM, MLP). 4 are safe.**
+
+---
+
+## Exp 8 — `exp/extended-search` *(in progress)*
+
+**Change:** Extended search grids for the 5 models that hit boundaries in Exp 7.
+
+| Model | Parameter | Old range | New range |
+|---|---|---|---|
+| SVR_lin | C | [0.01…1000] | [0.01…**10000**] |
+| Ridge | alpha | [0.0001…100] | [0.0001…**1000**] |
+| SVR_rbf | C | [0.01…100] | [**0.001**…100] |
+| SVR_rbf | gamma | [0.001…0.1] | [**0.0001**…0.1] |
+| LightGBM | learning_rate | [0.01…0.1] | [**0.005**…0.1] |
+| LightGBM | n_estimators | [100…300] | [100…**500**] |
+| LightGBM | num_leaves | [15…63] | [**7**…63] |
+| MLP | hidden_layer_sizes | max (128,64,32) | adds **(256,128,64)** |
+
+*Results to be filled in after tuning completes.*
+
+---
+
 ## Summary
 
 ### SVR_lin Sharpe Ranking (all experiments)
