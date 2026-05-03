@@ -1,0 +1,19 @@
+{
+  "model": "LightGBM",
+  "best_params": {
+    "learning_rate": 0.01,
+    "n_estimators": 300,
+    "num_leaves": 15,
+    "subsample": 0.8,
+    "zscore_win": 5,
+    "signal_threshold": 0.5
+  },
+  "cv_mse": 0.00014121400374843138,
+  "MSE": 0.0007160001501358408,
+  "CAGR": 2.806187283819519,
+  "Sharpe": 8.574828087003011,
+  "PF": 7.79294744089358,
+  "MaxDD": -0.03830933495313927,
+  "DirAcc": 0.592173017507724,
+  "PredStd": 0.017616329920840786
+}
