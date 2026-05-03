@@ -248,22 +248,21 @@ A boundary hit means the optimum may lie outside the tested range.
 
 ---
 
-## Exp 8 — `exp/extended-search` *(in progress)*
+## Exp 8 — `exp/extended-search`
 
 **Change:** Extended search grids for the 5 models that hit boundaries in Exp 7.
 
-| Model | Parameter | Old range | New range |
-|---|---|---|---|
-| SVR_lin | C | [0.01…1000] | [0.01…**10000**] |
-| Ridge | alpha | [0.0001…100] | [0.0001…**1000**] |
-| SVR_rbf | C | [0.01…100] | [**0.001**…100] |
-| SVR_rbf | gamma | [0.001…0.1] | [**0.0001**…0.1] |
-| LightGBM | learning_rate | [0.01…0.1] | [**0.005**…0.1] |
-| LightGBM | n_estimators | [100…300] | [100…**500**] |
-| LightGBM | num_leaves | [15…63] | [**7**…63] |
-| MLP | hidden_layer_sizes | max (128,64,32) | adds **(256,128,64)** |
+| Model | Sharpe | CAGR | Active DirAcc | Coverage | vs Exp 7 | Best params |
+|---|---:|---:|---:|---:|---:|---|
+| **SVR_lin** | **9.54** | **351%** | **76.7%** | **85.2%** | **+0.09** | C=0.1, thr=0.3 |
+| SVR_rbf | 8.93 | 300% | 78.0% | 74.6% | +0.19 | C=0.1, γ=0.0001, thr=0.5 |
+| MLP | 8.75 | 293% | 77.4% | 75.6% | +0.32 | hidden=(256,128,64), thr=0.5 |
+| Ridge | 8.51 | 279% | 76.5% | 75.4% | **−0.65** | α=1000, thr=0.5 |
+| LightGBM | 8.04 | 265% | 74.8% | 78.1% | 0.00 | unchanged |
 
-*Results to be filled in after tuning completes.*
+*Unchanged models (Lasso, ElasticNet, XGBoost, RandomForest) carry forward from Exp 7.*
+
+**Finding:** Mixed results. Three models improved (SVR_rbf +0.19, MLP +0.32 from new `(256,128,64)` arch, SVR_lin +0.09). Ridge got worse — alpha jumped from 100 to 1000 (upper boundary again), meaning OOF CV kept pushing toward stronger regularization, which underfit on the test set. LightGBM's extension found the same params — the original grid was already optimal. New boundary hit: Ridge alpha=1000 is the new upper limit of the extended range; further extension not recommended since test performance degraded with more regularization.
 
 ---
 
@@ -273,14 +272,15 @@ A boundary hit means the optimum may lie outside the tested range.
 
 | Rank | Experiment | SVR_lin Sharpe | Primary Change |
 |---|---|---:|---|
-| 1 | `exp/combined-best` | **9.45** | ZSCORE_WIN=5 + threshold + ElasticNet fix |
-| 2 | `exp/zscore-win-tuning` | 9.03 | ZSCORE_WIN: 10 → 5 |
-| 3 | `exp/signal-dead-zone` | 8.49 | Hold cash when \|z\| < 0.5 |
-| 4 | `main` (baseline) | 7.81 | — |
-| 4 | `exp/controlled-39-features` | 7.81 | 39 features (neutral) |
-| 4 | `exp/tune-elasticnet-lightgbm` | 7.81 | ElasticNet fixed |
-| 5 | `exp/per-model-k-alpha` | 7.22 | Per-model k |
-| 5 | `exp/proportional-sizing` | 7.21 | Continuous sizing |
+| 1 | `exp/extended-search` | **9.54** | Wider C grid; best C shifted to 0.1 |
+| 2 | `exp/combined-best` | 9.45 | ZSCORE_WIN=5 + threshold + ElasticNet fix |
+| 3 | `exp/zscore-win-tuning` | 9.03 | ZSCORE_WIN: 10 → 5 |
+| 4 | `exp/signal-dead-zone` | 8.49 | Hold cash when \|z\| < 0.5 |
+| 5 | `main` (baseline) | 7.81 | — |
+| 5 | `exp/controlled-39-features` | 7.81 | 39 features (neutral) |
+| 5 | `exp/tune-elasticnet-lightgbm` | 7.81 | ElasticNet fixed |
+| 6 | `exp/per-model-k-alpha` | 7.22 | Per-model k |
+| 6 | `exp/proportional-sizing` | 7.21 | Continuous sizing |
 
 ### What Works
 
@@ -289,6 +289,8 @@ A boundary hit means the optimum may lie outside the tested range.
 | ZSCORE_WIN=5 | +1.68 (RF), +1.53 (SVR_rbf) | Universal improvement, was a regression |
 | Signal dead zone (per-model threshold) | +0.82 (RF), +0.80 (SVR_rbf) | Cuts noise trades |
 | ElasticNet alpha fix | +5.64 (combined) | Was severely misconfigured |
+| MLP wider hidden layers (256,128,64) | +0.32 | Exp 8 extension found larger net helps |
+| SVR_rbf lower gamma (0.0001) | +0.19 | Exp 8 found smoother kernel more effective |
 
 ### What Doesn't Work
 
@@ -296,3 +298,4 @@ A boundary hit means the optimum may lie outside the tested range.
 |---|---|---|
 | Per-model SelectKBest k | −0.59 (SVR_lin) | Optimal k=57 (no selection needed) |
 | Proportional sizing z/3 | −0.60 (SVR_lin) | Lower average position size reduces returns |
+| Ridge alpha > 100 | −0.65 (Ridge) | Exp 8 pushed alpha to 1000; test Sharpe degraded — CV/Sharpe misalignment |
