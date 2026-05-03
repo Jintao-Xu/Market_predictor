@@ -232,19 +232,19 @@ active = sig != 0
 After Exp 7, each model's best params were checked against its search grid boundaries.
 A boundary hit means the optimum may lie outside the tested range.
 
-| Model | Best Param | Boundary? | Action |
-|---|---|---|---|
-| SVR_lin | C=1000 | UPPER — max of [0.01…1000] | Extend to [1000, 5000, 10000] |
-| Ridge | alpha=100 | UPPER — max of [0.0001…100] | Extend to [100, 500, 1000] |
-| SVR_rbf | C=0.01, gamma=0.001 | BOTH LOWER — min of each range | Extend C to [0.001, 0.01], gamma to [0.0001, 0.001] |
-| LightGBM | lr=0.01, n_est=300, leaves=15 | 3 boundaries — lower, upper, lower | lr→[0.005, 0.01], n_est→[300, 500], leaves→[7, 15] |
-| MLP | hidden=(128,64,32) | UPPER — largest in grid | Add (256,128,64) |
-| XGBoost | max_depth=2 | lower of [2,3,4,5] | Skip — depth=1 = stumps, unlikely to help |
-| RandomForest | min_samples_leaf=1, min_samples_split=2 | both lower | Skip — minimum-regularization values, already optimal direction |
-| ElasticNet | l1_ratio=0.1 | LOWER min of [0.1…0.9] | Skip — toward 0 = Ridge territory, already covered |
-| Lasso | alpha=0.001 | middle of range | Nothing to do |
+| Model | Best Param | Boundary? | Action | Exp 8 Outcome |
+|---|---|---|---|---|
+| SVR_lin | C=1000 | UPPER | Extended to [1000, 5000, 10000] | +0.09 Sharpe ✓ |
+| Ridge | alpha=100 | UPPER | Extended to [100, 500, 1000] | −0.65 Sharpe ✗ — CV/Sharpe misalignment; closed |
+| SVR_rbf | C=0.01, gamma=0.001 | BOTH LOWER | Extended C↓ and gamma↓ | +0.19 Sharpe ✓ |
+| LightGBM | lr=0.01, n_est=300, leaves=15 | 3 boundaries | Extended all 3 directions | 0.00 — original was already optimal |
+| MLP | hidden=(128,64,32) | UPPER | Added (256,128,64) | +0.32 Sharpe ✓ |
+| XGBoost | max_depth=2 | lower | Skipped — depth=1 = stumps | — |
+| RandomForest | min_samples_leaf=1, min_samples_split=2 | both lower | Skipped — already minimum regularization | — |
+| ElasticNet | l1_ratio=0.1 | LOWER | Skipped — toward 0 = Ridge territory | — |
+| Lasso | alpha=0.001 | middle | Nothing to do | — |
 
-**5 models need grid extensions (SVR_lin, Ridge, SVR_rbf, LightGBM, MLP). 4 are safe.**
+**Result: 3/5 extended models improved. Ridge is a CV-objective problem, not a grid problem.**
 
 ---
 
@@ -262,7 +262,68 @@ A boundary hit means the optimum may lie outside the tested range.
 
 *Unchanged models (Lasso, ElasticNet, XGBoost, RandomForest) carry forward from Exp 7.*
 
-**Finding:** Mixed results. Three models improved (SVR_rbf +0.19, MLP +0.32 from new `(256,128,64)` arch, SVR_lin +0.09). Ridge got worse — alpha jumped from 100 to 1000 (upper boundary again), meaning OOF CV kept pushing toward stronger regularization, which underfit on the test set. LightGBM's extension found the same params — the original grid was already optimal. New boundary hit: Ridge alpha=1000 is the new upper limit of the extended range; further extension not recommended since test performance degraded with more regularization.
+**Finding:** Mixed results. Three models improved (SVR_rbf +0.19, MLP +0.32 from new `(256,128,64)` arch, SVR_lin +0.09). Ridge got worse — alpha jumped to 1000 (upper boundary again), and test Sharpe dropped. This is a CV/Sharpe misalignment: MSE-based CV keeps preferring stronger regularization (flatter predictions → lower MSE) but flatter predictions also produce weaker z-score signals → lower Sharpe. **Ridge grid extension is closed** — the problem is the wrong CV objective, not the grid range. See the note below. LightGBM's extension found the same params — the original grid was already optimal.
+
+---
+
+## CV Objective Note — MSE vs Sharpe Misalignment
+
+### The problem
+
+All models are currently tuned with `GridSearchCV(scoring='neg_mean_squared_error')`. For most models this works well, but for Ridge (and potentially other linear models) it creates a systematic misalignment:
+
+- Higher alpha → smoother, smaller-variance predictions → **lower MSE** → CV picks it
+- Smaller-variance predictions → smaller z-scores → weaker signal differentiation → **lower Sharpe**
+
+The signal params (zscore_win, threshold) are already selected by OOF Sharpe. The problem is that the *model* params (alpha, C, etc.) are still selected by MSE — and for some models those two objectives point in opposite directions.
+
+### Three options, ordered by impact
+
+**Option 1 — Extend OOF Sharpe sweep to model params (recommended)**
+
+Instead of using GridSearchCV for model params, manually iterate over all param combos, collect OOF predictions, then pick the (model_params, signal_params) combo with the best joint OOF Sharpe. Replaces `GridSearchCV` entirely for sklearn models:
+
+```python
+best_sharpe, best_model_params, best_zw, best_thr = -np.inf, None, None, None
+for params in ParameterGrid(model_grid):          # iterate model param combos
+    oof_preds = cross_val_predict(model(**params), X_tv, y_tv, cv=tscv)
+    for zw in zscore_win_vals:
+        for thr in threshold_vals:
+            s = trading_metrics(oof_preds, lr_tv, y_tv, zscore_win=zw, threshold=thr)['Sharpe']
+            if s > best_sharpe:
+                best_sharpe, best_model_params, best_zw, best_thr = s, params, zw, thr
+```
+
+**Trade-off:** More fits (n_model_combos × 5 folds instead of n_model_combos × 5 folds via GridSearchCV — same count, just sequential). For fast models (Ridge, Lasso, ElasticNet, LightGBM) this is negligible. For SVR_rbf the cross product with signal params grows but is still manageable.
+
+**Option 2 — Custom Sharpe scorer in GridSearchCV**
+
+Pass a custom scorer to GridSearchCV that computes OOF Sharpe directly. Requires threading log_rets into the scorer via a closure or a wrapper:
+
+```python
+def make_sharpe_scorer(log_rets_tv, zscore_win, threshold):
+    def scorer(estimator, X, y):
+        preds = estimator.predict(X)
+        return trading_metrics(preds, log_rets_tv[len(log_rets_tv)-len(y):],
+                               zscore_win=zscore_win, threshold=threshold)['Sharpe']
+    return make_scorer(scorer, greater_is_better=True)
+```
+
+**Trade-off:** Simpler code change, but signal params must be fixed during model selection (no joint sweep). Less principled than Option 1.
+
+**Option 3 — Two-stage: MSE shortlist → Sharpe final pick**
+
+Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with OOF Sharpe to pick the winner. Low implementation cost, minimal risk of overfitting to Sharpe noise.
+
+### Which models need this
+
+| Model | Problem? | Reason |
+|---|---|---|
+| Ridge | Yes — confirmed | alpha=1000 beats MSE but loses on Sharpe |
+| Lasso | Possibly | alpha is at a grid middle point — may be fine |
+| ElasticNet | Possibly | l1_ratio at lower boundary; same dynamic possible |
+| SVR_lin | Unlikely | C is not a regularization parameter in the same direction |
+| SVR_rbf, XGBoost, RF, LightGBM, MLP | Unlikely | Tree/kernel models less sensitive to this effect |
 
 ---
 
