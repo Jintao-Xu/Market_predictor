@@ -248,10 +248,13 @@ def trading_metrics(preds, log_rets, zscore_win=None, threshold=None):
     roll_max = np.maximum.accumulate(eq)
     max_dd = float(np.min((eq - roll_max) / (roll_max + 1e-12)))
     mkt_dir = np.sign(log_rets[:n_])
-    dir_acc = float(np.mean(sig == mkt_dir))
-    mse     = mean_squared_error(y_test[:n_], preds)
+    active  = sig != 0
+    dir_acc  = float(np.mean(sig[active] == mkt_dir[active])) if active.any() else 0.0
+    coverage = float(np.mean(active))
+    mse      = mean_squared_error(y_test[:n_], preds)
     return dict(Sharpe=sharpe, CAGR=cagr, PF=pf, MaxDD=max_dd,
-                DirAcc=dir_acc, MSE=mse, equity=eq, signal=sig, preds=np.array(preds))
+                DirAcc=dir_acc, Coverage=coverage, MSE=mse,
+                equity=eq, signal=sig, preds=np.array(preds))
 
 def make_sequences(X_, y_, ts):
     Xs, ys = [], []
@@ -294,7 +297,7 @@ for name, model in SK_CONFIGS.items():
     all_metrics[name] = m; all_preds[name] = preds; all_signals[name] = m['signal']
     sk_fitted[name] = model
     print(f'  {name:<22} Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
-          f'zscore_win={zw}  threshold={thr}  params={TUNED[name]}')
+          f'Coverage={m["Coverage"]*100:.1f}%  zscore_win={zw}  threshold={thr}  params={TUNED[name]}')
 
 # ── Keras models ───────────────────────────────────────────────────────────────
 print('\nFitting Keras models with tuned params...')
@@ -352,7 +355,8 @@ for model_name, build_info in [
     all_preds[model_name]   = preds
     all_signals[model_name] = met['signal']
     keras_fitted[model_name] = (m, ts)
-    print(f'  {model_name:<22} Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  ts={ts}  zscore_win={zw}  threshold={thr}')
+    print(f'  {model_name:<22} Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  '
+          f'Coverage={met["Coverage"]*100:.1f}%  ts={ts}  zscore_win={zw}  threshold={thr}')
 
 # Buy & Hold
 bnh_eq     = np.exp(np.cumsum(log_ret_test))
@@ -374,13 +378,14 @@ for name in MODEL_ORDER:
     if name not in all_metrics:
         continue
     m = all_metrics[name]
-    rows.append({'Model': name,
-                 'Sharpe': round(m['Sharpe'], 4),
-                 'CAGR_%': round(m['CAGR'], 2),
-                 'DirAcc': round(m['DirAcc'], 4),
-                 'PF':     round(m['PF'], 4),
-                 'MaxDD':  round(m['MaxDD'], 4),
-                 'MSE':    round(m['MSE'], 6)})
+    rows.append({'Model':    name,
+                 'Sharpe':   round(m['Sharpe'], 4),
+                 'CAGR_%':   round(m['CAGR'], 2),
+                 'DirAcc':   round(m['DirAcc'], 4),
+                 'Coverage': round(m['Coverage'], 4),
+                 'PF':       round(m['PF'], 4),
+                 'MaxDD':    round(m['MaxDD'], 4),
+                 'MSE':      round(m['MSE'], 6)})
 metrics_df = pd.DataFrame(rows)
 metrics_df.to_csv(f'{RESULTS_DIR}/all_model_metrics.csv', index=False)
 print(f'\nSaved → {RESULTS_DIR}/all_model_metrics.csv')
@@ -402,10 +407,10 @@ COLORS = {
 fig, ax = plt.subplots(figsize=(14, 5))
 ax.axis('off')
 
-col_labels = ['Model', 'Sharpe', 'CAGR', 'DirAcc', 'Profit Factor', 'Max DD', 'MSE']
-col_keys   = ['Model', 'Sharpe', 'CAGR_%', 'DirAcc', 'PF', 'MaxDD', 'MSE']
+col_labels = ['Model', 'Sharpe', 'CAGR', 'Active DirAcc', 'Coverage', 'Profit Factor', 'Max DD', 'MSE']
+col_keys   = ['Model', 'Sharpe', 'CAGR_%', 'DirAcc', 'Coverage', 'PF', 'MaxDD', 'MSE']
 bnh_row    = ['Buy & Hold', f'{bnh_sharpe:.3f}', f'{bnh_cagr:.1f}%',
-              f'{bnh_up*100:.1f}%', '—', '—', '—']
+              f'{bnh_up*100:.1f}%', '100.0%', '—', '—', '—']
 
 table_data = []
 row_colors = []
@@ -416,6 +421,7 @@ for _, row in sorted_df.iterrows():
         f"{row['Sharpe']:.3f}",
         f"{row['CAGR_%']:.1f}%",
         f"{row['DirAcc']*100:.1f}%",
+        f"{row['Coverage']*100:.1f}%",
         f"{row['PF']:.2f}",
         f"{row['MaxDD']*100:.1f}%",
         f"{row['MSE']:.6f}",
@@ -489,7 +495,7 @@ for name in MODEL_ORDER:
     al  = 1.0  if m['Sharpe'] >= SHARPE_THRESH else 0.45
     star = ' ★' if m['Sharpe'] >= SHARPE_THRESH else ''
     lbl = (f'{name}{star}  Sharpe={m["Sharpe"]:.2f}  '
-           f'CAGR={m["CAGR"]:.0f}%  DirAcc={m["DirAcc"]*100:.1f}%')
+           f'CAGR={m["CAGR"]:.0f}%  DirAcc={m["DirAcc"]*100:.1f}%  Cov={m["Coverage"]*100:.0f}%')
     ax1.plot(dates_test[:n_], eq, color=COLOR_MAP[name], lw=lw, ls=ls, alpha=al, label=lbl)
 
 ax1.set_ylabel('Portfolio Value (×)')
@@ -545,7 +551,7 @@ for name in MODEL_ORDER:
     ax.plot(dates_test[:n_], p, color='tomato', lw=0.8,
             alpha=0.85, label='Predicted')
     star = ' ★' if m['Sharpe'] >= SHARPE_THRESH else ''
-    ax.set_title(f'{name}{star}\nSharpe={m["Sharpe"]:.2f}  DirAcc={m["DirAcc"]*100:.1f}%',
+    ax.set_title(f'{name}{star}\nSharpe={m["Sharpe"]:.2f}  DirAcc={m["DirAcc"]*100:.1f}%  Cov={m["Coverage"]*100:.0f}%',
                  fontsize=9)
     ax.grid(alpha=0.2); ax.legend(fontsize=7)
     ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%y'))
@@ -688,17 +694,17 @@ lines = [
     f'Features: {len(FEATURE_COLS)} | Frac-diff d={FRAC_D} | Z-score wins: {ZSCORE_WINS} | Thresholds: {THRESHOLDS}',
     '=' * 72,
     '',
-    f'{"Model":<22} {"Sharpe":>7} {"CAGR":>8} {"DirAcc":>8} {"MaxDD":>8}  Tuned Params',
-    '-' * 72,
+    f'{"Model":<22} {"Sharpe":>7} {"CAGR":>8} {"DirAcc":>8} {"Coverage":>9} {"MaxDD":>8}  Tuned Params',
+    '-' * 78,
 ]
 for name, m in sorted_metrics:
     star = ' ★' if m['Sharpe'] >= SHARPE_THRESH else '  '
     p_str = json.dumps(TUNED[name])
     lines.append(f'{name:<22}{star} {m["Sharpe"]:>6.3f} {m["CAGR"]:>7.1f}% '
-                 f'{m["DirAcc"]*100:>7.1f}% {m["MaxDD"]*100:>7.1f}%  {p_str}')
+                 f'{m["DirAcc"]*100:>7.1f}% {m["Coverage"]*100:>8.1f}% {m["MaxDD"]*100:>7.1f}%  {p_str}')
 lines += [
-    '-' * 72,
-    f'{"Buy & Hold":<22}   {bnh_sharpe:>6.3f} {bnh_cagr:>7.1f}%   {"55.0%":>7} {"—":>8}',
+    '-' * 78,
+    f'{"Buy & Hold":<22}   {bnh_sharpe:>6.3f} {bnh_cagr:>7.1f}%   {"55.0%":>7} {"100.0%":>8} {"—":>8}',
     '',
     f'★ Sharpe ≥ {SHARPE_THRESH} (strong outperformance)',
     '',
@@ -708,9 +714,10 @@ lines += [
     f'White Reality Check  (best model): p={wrc_pval:.4f}'
          + (' ✓ significant' if wrc_pval < 0.05 else ' ✗ not significant'),
     '',
+    'Note: DirAcc = active-position days only (sig≠0); Coverage = fraction of days in market.',
     'Note: SelectKBest leakage fixed 2026-05-02. XGBoost retrained with k=39',
     '(all features). best_model_XGB.joblib updated.',
-    '=' * 72,
+    '=' * 78,
 ]
 with open(f'{RESULTS_DIR}/final_summary.txt', 'w') as f:
     f.write('\n'.join(lines))

@@ -369,14 +369,16 @@ def trading_metrics(preds, log_rets, y_true, zscore_win=None, threshold=None):
     st  = sig * lr
     eq  = np.exp(np.cumsum(st))
     mkt = np.sign(lr)
+    active = sig != 0
     return {
-        'MSE':    float(mean_squared_error(y_true[:n], preds[:n])),
-        'CAGR':   float(eq[-1] ** (252/n) - 1),
-        'Sharpe': float(np.mean(st) / (np.std(st) + 1e-12) * np.sqrt(252)),
-        'PF':     float(st[st>0].sum() / abs(st[st<0].sum())) if st[st<0].sum() != 0 else np.inf,
-        'MaxDD':  float(((eq - np.maximum.accumulate(eq)) / np.maximum.accumulate(eq)).min()),
-        'DirAcc': float(np.mean(sig == mkt)),
-        'PredStd': float(np.std(preds[:n])),
+        'MSE':      float(mean_squared_error(y_true[:n], preds[:n])),
+        'CAGR':     float(eq[-1] ** (252/n) - 1),
+        'Sharpe':   float(np.mean(st) / (np.std(st) + 1e-12) * np.sqrt(252)),
+        'PF':       float(st[st>0].sum() / abs(st[st<0].sum())) if st[st<0].sum() != 0 else np.inf,
+        'MaxDD':    float(((eq - np.maximum.accumulate(eq)) / np.maximum.accumulate(eq)).min()),
+        'DirAcc':   float(np.mean(sig[active] == mkt[active])) if active.any() else 0.0,
+        'Coverage': float(np.mean(active)),
+        'PredStd':  float(np.std(preds[:n])),
     }
 
 # ══════════════════════════════════════════════════════════════════════════════
