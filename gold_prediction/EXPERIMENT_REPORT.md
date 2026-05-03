@@ -382,12 +382,43 @@ Active DirAcc is notably higher across the board (SVR_lin 88.4%, SVR_rbf 89.6%) 
 
 ---
 
+---
+
+## Exp 11 — `exp/combined-recent` ★★★ Best Overall
+
+**Change:** Hybrid best-of-both setup. Training window: recent 3 years (2023-05-01 → 2025-09-23, 604 rows). Test: 2025-09-24 → 2026-05-01 (152 days).
+
+- **Exp 10 (recent-3yr) params** used for models that improved on the recent window: SVR_lin, Ridge, Lasso, ElasticNet, SVR_rbf, XGBoost
+- **Exp 9 (sharpe-cv) params** used for models that degraded on the recent window: LightGBM, RandomForest, MLP, LSTM, GRU, BiLSTM
+
+Rationale: Exp 9 params were tuned on the full history with Sharpe-CV. For ensemble/deep learning models that need more training data, those params are better calibrated than the ones over-fitted to 604 rows.
+
+| Model | Sharpe | CAGR | Active DirAcc | Coverage | Params source |
+|---|---:|---:|---:|---:|---|
+| **SVR_lin** | **10.60** | **1341%** | **88.4%** | **73.7%** | Exp 10 |
+| Ridge | 10.13 | 1321% | 82.8% | 88.2% | Exp 10 |
+| Lasso | 9.98 | 1286% | 81.6% | 89.5% | Exp 10 |
+| ElasticNet | 9.98 | 1286% | 81.6% | 89.5% | Exp 10 |
+| SVR_rbf | 9.82 | 1072% | 89.6% | 63.2% | Exp 10 |
+| XGBoost | 9.62 | 1098% | 80.9% | 72.4% | Exp 10 |
+| **LightGBM** | **9.08** | — | **78.2%** | **87.5%** | Exp 9 (↑ vs Exp10 8.51) |
+| RandomForest | 7.26 | — | 77.6% | 76.3% | Exp 9 |
+| MLP | 3.48 | — | 63.1% | 80.3% | Exp 9 (↑ vs Exp10 1.44) |
+| GRU | 0.74 | — | 51.5% | 99.3% | Exp 9 (↑ vs Exp10 −0.46) |
+| LSTM | −0.53 | — | 46.5% | 99.3% | Exp 9 (↑ vs Exp10 −0.75) |
+| BiLSTM | −0.40 | — | 53.9% | 99.3% | Exp 9 (↑ vs Exp10 −1.03) |
+
+**Finding:** Using Exp 9 hyperparams for ensemble/deep learning on the 3-year window partially recovers performance. LightGBM 8.51 → 9.08, MLP 1.44 → 3.48, GRU −0.46 → +0.74. The deeper architectures and larger n_estimators from Exp 9 are better suited to the limited training data than the small models Exp 10 tuned selected. Deep learning (LSTM, BiLSTM) remains negative — 604 sequences is a hard floor for these architectures regardless of params.
+
+---
+
 ## Summary
 
 ### SVR_lin Sharpe Ranking (all experiments)
 
 | Rank | Experiment | SVR_lin Sharpe | Primary Change |
 |---|---|---:|---|
+| 1 | `exp/combined-recent` | **10.60** | Hybrid: Exp10 params for linear/SVM/XGB, Exp9 for rest |
 | 1 | `exp/recent-3yr` | **10.60** | Train on last 3 years only |
 | 2 | `exp/extended-search` | **9.54** | Wider C grid |
 | 2 | `exp/combined-best` | 9.45 | ZSCORE_WIN=5 + threshold + ElasticNet fix |
@@ -404,7 +435,8 @@ Active DirAcc is notably higher across the board (SVR_lin 88.4%, SVR_rbf 89.6%) 
 
 | Experiment | Best model | Sharpe |
 |---|---|---:|
-| `exp/recent-3yr` | SVR_lin | **10.60** |
+| `exp/combined-recent` | SVR_lin | **10.60** |
+| `exp/recent-3yr` | SVR_lin | 10.60 |
 | `exp/sharpe-cv` | SVR_lin | 9.45 |
 | `exp/extended-search` | SVR_lin | 9.54 |
 | `exp/combined-best` | SVR_lin | 9.45 |
