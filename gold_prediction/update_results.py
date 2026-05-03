@@ -51,7 +51,7 @@ MODELS_DIR  = 'saved_models'
 RESULTS_DIR = 'results'
 DATA_DIR    = 'data'
 SEED        = 42
-ZSCORE_WIN  = 10
+ZSCORE_WIN  = 10   # default fallback when no tuned zscore_win available
 SHARPE_THRESH = 7.5
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -76,6 +76,14 @@ def load_tuned(name, defaults):
         return json.load(open(path)).get('best_params', defaults)
     return defaults
 
+def load_tuned_zscore_win(name):
+    """Return the tuned zscore_win for a model, or the global default."""
+    path = f'{MODELS_DIR}/tuned_{name}.json'
+    if os.path.exists(path):
+        params = json.load(open(path)).get('best_params', {})
+        return int(params.get('zscore_win', ZSCORE_WIN))
+    return ZSCORE_WIN
+
 TUNED = {
     'Ridge':        load_tuned('Ridge',        {'alpha': 0.01}),
     'Lasso':        load_tuned('Lasso',        {'alpha': 0.001}),
@@ -90,6 +98,10 @@ TUNED = {
     'ElasticNet':   load_tuned('ElasticNet',   {'alpha': 0.01, 'l1_ratio': 0.5}),
     'LightGBM':     load_tuned('LightGBM',     {'n_estimators': 200, 'num_leaves': 31, 'learning_rate': 0.05}),
 }
+
+# Per-model zscore_win — read from tuned JSON if available, else fall back to global default
+ZSCORE_WINS = {name: load_tuned_zscore_win(name) for name in TUNED}
+print(f'  Per-model zscore_win: {ZSCORE_WINS}')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. FEATURE ENGINEERING (identical to train.py / plot_tuned.py)
@@ -201,13 +213,18 @@ X_te_s = sc.transform(X_test)
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. FIT ALL MODELS + COLLECT METRICS
 # ══════════════════════════════════════════════════════════════════════════════
-def trading_metrics(preds, log_rets):
+def trading_metrics(preds, log_rets, zscore_win=None):
+    if zscore_win is None:
+        zscore_win = ZSCORE_WIN
+    # Ensure numpy arrays so [-1] indexing always works (pandas Series would raise KeyError: -1)
+    preds    = np.asarray(preds)
+    log_rets = np.asarray(log_rets)
     n_ = len(preds)
     ps  = pd.Series(preds)
-    z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / \
-          ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
+    z   = (ps - ps.rolling(zscore_win, min_periods=1).mean()) / \
+          ps.rolling(zscore_win, min_periods=1).std().fillna(1e-8)
     sig    = np.where(z > 0, 1, -1).astype(float)
-    strat  = sig * np.array(log_rets[:n_])
+    strat  = sig * log_rets[:n_]
     eq     = np.exp(np.cumsum(strat))
     cagr   = (eq[-1] ** (252 / n_) - 1) * 100
     sharpe = strat.mean() / (strat.std() + 1e-12) * np.sqrt(252)
@@ -216,7 +233,7 @@ def trading_metrics(preds, log_rets):
     pf     = wins / (losses + 1e-12)
     roll_max = np.maximum.accumulate(eq)
     max_dd = float(np.min((eq - roll_max) / (roll_max + 1e-12)))
-    mkt_dir = np.sign(np.array(log_rets[:n_]))
+    mkt_dir = np.sign(log_rets[:n_])
     dir_acc = float(np.mean(sig == mkt_dir))
     mse     = mean_squared_error(y_test[:n_], preds)
     return dict(Sharpe=sharpe, CAGR=cagr, PF=pf, MaxDD=max_dd,
@@ -230,32 +247,38 @@ def make_sequences(X_, y_, ts):
 
 all_metrics = {}; all_preds = {}; all_signals = {}
 
+# Helper: strip non-model keys (e.g. zscore_win) from a param dict
+def model_params(name):
+    """Return TUNED[name] with signal-only keys (zscore_win) removed."""
+    return {k: v for k, v in TUNED[name].items() if k != 'zscore_win'}
+
 # ── sklearn models ─────────────────────────────────────────────────────────────
 print('\nFitting sklearn models with tuned params...')
 SK_CONFIGS = {
-    'Ridge':        Ridge(**TUNED['Ridge']),
-    'Lasso':        Lasso(**TUNED['Lasso']),
-    'SVR_lin':      LinearSVR(C=TUNED['SVR_lin']['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True),
-    'SVR_rbf':      SVR(kernel='rbf', C=TUNED['SVR_rbf']['C'],
-                        gamma=TUNED['SVR_rbf']['gamma'], epsilon=SVR_EPSILON),
-    'XGBoost':      xgb.XGBRegressor(**TUNED['XGBoost'], random_state=SEED, verbosity=0),
-    'RandomForest': RandomForestRegressor(**TUNED['RandomForest'], random_state=SEED),
+    'Ridge':        Ridge(**model_params('Ridge')),
+    'Lasso':        Lasso(**model_params('Lasso')),
+    'SVR_lin':      LinearSVR(C=model_params('SVR_lin')['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True),
+    'SVR_rbf':      SVR(kernel='rbf', C=model_params('SVR_rbf')['C'],
+                        gamma=model_params('SVR_rbf')['gamma'], epsilon=SVR_EPSILON),
+    'XGBoost':      xgb.XGBRegressor(**model_params('XGBoost'), random_state=SEED, verbosity=0),
+    'RandomForest': RandomForestRegressor(**model_params('RandomForest'), random_state=SEED),
     'MLP':          MLPRegressor(**{k: tuple(v) if isinstance(v, list) else v
-                                    for k, v in TUNED['MLP'].items()},
+                                    for k, v in model_params('MLP').items()},
                                  max_iter=500, random_state=SEED),
-    'ElasticNet':   ElasticNet(**TUNED['ElasticNet'], max_iter=5000),
+    'ElasticNet':   ElasticNet(**model_params('ElasticNet'), max_iter=5000),
 }
 if LIGHTGBM_AVAILABLE:
-    SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**TUNED['LightGBM'], random_state=SEED, verbose=-1)
+    SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**model_params('LightGBM'), random_state=SEED, verbose=-1)
 sk_fitted = {}
 for name, model in SK_CONFIGS.items():
     model.fit(X_tv_s, y_trainval)
     preds = model.predict(X_te_s)
-    m = trading_metrics(preds, log_ret_test)
+    zw = ZSCORE_WINS.get(name, ZSCORE_WIN)
+    m = trading_metrics(preds, log_ret_test, zscore_win=zw)
     all_metrics[name] = m; all_preds[name] = preds; all_signals[name] = m['signal']
     sk_fitted[name] = model
     print(f'  {name:<22} Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
-          f'params={TUNED[name]}')
+          f'zscore_win={zw}  params={TUNED[name]}')
 
 # ── Keras models ───────────────────────────────────────────────────────────────
 print('\nFitting Keras models with tuned params...')
@@ -306,12 +329,13 @@ for model_name, build_info in [
           validation_split=0.1)
 
     preds = m.predict(Xte_sq, verbose=0).flatten()
-    met   = trading_metrics(preds, lr_test)
+    zw = ZSCORE_WINS.get(model_name, ZSCORE_WIN)
+    met   = trading_metrics(preds, lr_test, zscore_win=zw)
     all_metrics[model_name] = met
     all_preds[model_name]   = preds
     all_signals[model_name] = met['signal']
     keras_fitted[model_name] = (m, ts)
-    print(f'  {model_name:<22} Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  ts={ts}')
+    print(f'  {model_name:<22} Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  ts={ts}  zscore_win={zw}')
 
 # Buy & Hold
 bnh_eq     = np.exp(np.cumsum(log_ret_test))
@@ -644,7 +668,7 @@ lines = [
     'GOLD PRICE PREDICTION — FINAL SUMMARY',
     f'Generated: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}',
     f'Test period: {dates_test[0].date()} → {dates_test[-1].date()} ({len(dates_test)} days)',
-    f'Features: {len(FEATURE_COLS)} | Frac-diff d={FRAC_D} | Z-score window={ZSCORE_WIN}',
+    f'Features: {len(FEATURE_COLS)} | Frac-diff d={FRAC_D} | Z-score windows (per model): {ZSCORE_WINS}',
     '=' * 72,
     '',
     f'{"Model":<22} {"Sharpe":>7} {"CAGR":>8} {"DirAcc":>8} {"MaxDD":>8}  Tuned Params',

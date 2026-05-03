@@ -44,7 +44,7 @@ DATA_DIR   = 'data'
 MODELS_DIR = 'saved_models'
 SEED       = 42
 N_JOBS     = -1
-ZSCORE_WIN = 10   # must match train.py and predict_tomorrow.py
+ZSCORE_WIN = 10   # default fallback; tunable via PARAM_CATALOGUE zscore_win grid
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PARAMETER CATALOGUE
@@ -56,7 +56,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {},
         'grid': {
-            'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'alpha':      [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'zscore_win': [5, 7, 10, 15, 20],
         },
     },
     'Lasso': {
@@ -64,7 +65,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {},
         'grid': {
-            'alpha': [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            'alpha':      [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            'zscore_win': [5, 7, 10, 15, 20],
         },
     },
     'SVR_lin': {
@@ -72,7 +74,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'max_iter': 10000, 'dual': True},
         'grid': {
-            'C': [0.01, 0.1, 1, 10, 100, 1000],
+            'C':          [0.01, 0.1, 1, 10, 100, 1000],
+            'zscore_win': [5, 7, 10, 15, 20],
         },
     },
     'SVR_rbf': {
@@ -80,8 +83,9 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'kernel': 'rbf'},
         'grid': {
-            'C':     [0.01, 0.1, 1, 10, 100],
-            'gamma': ['scale', 0.001, 0.01, 0.1],
+            'C':          [0.01, 0.1, 1, 10, 100],
+            'gamma':      ['scale', 0.001, 0.01, 0.1],
+            'zscore_win': [5, 7, 10, 15, 20],
         },
     },
     'XGBoost': {
@@ -93,6 +97,7 @@ PARAM_CATALOGUE = {
             'max_depth':     [2, 3, 4, 5],
             'learning_rate': [0.01, 0.05, 0.1, 0.2],
             'subsample':     [0.8, 1.0],
+            'zscore_win':    [5, 7, 10, 15, 20],
         },
     },
     'RandomForest': {
@@ -100,10 +105,11 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'random_state': SEED},
         'grid': {
-            'n_estimators':     [50, 100, 200, 300],
-            'max_depth':        [3, 5, 10, None],
+            'n_estimators':      [50, 100, 200, 300],
+            'max_depth':         [3, 5, 10, None],
             'min_samples_split': [2, 5, 10],
             'min_samples_leaf':  [1, 2, 4],
+            'zscore_win':        [5, 7, 10, 15, 20],
         },
     },
     'MLP': {
@@ -114,6 +120,7 @@ PARAM_CATALOGUE = {
             'hidden_layer_sizes': [(32,), (64,), (128,), (64, 32), (128, 64), (128, 64, 32)],
             'alpha':              [0.0001, 0.001, 0.01],
             'learning_rate_init': [0.001, 0.01],
+            'zscore_win':         [5, 7, 10, 15, 20],
         },
     },
     'LSTM': {
@@ -125,6 +132,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.2, 0.35, 0.5],
             'recurrent_dropout': [0.0, 0.2],
+            'zscore_win':        [5, 7, 10, 15, 20],
         },
     },
     'GRU': {
@@ -136,6 +144,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.2, 0.3, 0.4],
             'recurrent_dropout': [0.0, 0.2],
+            'zscore_win':        [5, 7, 10, 15, 20],
         },
     },
     'BiLSTM': {
@@ -147,6 +156,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.3, 0.4, 0.5],
             'recurrent_dropout': [0.0, 0.2],
+            'zscore_win':        [5, 7, 10, 15, 20],
         },
     },
     'LightGBM': {
@@ -158,6 +168,7 @@ PARAM_CATALOGUE = {
             'num_leaves':    [15, 31, 63],
             'learning_rate': [0.01, 0.05, 0.1],
             'subsample':     [0.8, 1.0],
+            'zscore_win':    [5, 7, 10, 15, 20],
         },
     },
     'ElasticNet': {
@@ -165,8 +176,9 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'max_iter': 5000},
         'grid': {
-            'alpha':    [0.0001, 0.001, 0.01, 0.1],
-            'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],
+            'alpha':      [0.0001, 0.001, 0.01, 0.1],
+            'l1_ratio':   [0.1, 0.3, 0.5, 0.7, 0.9],
+            'zscore_win': [5, 7, 10, 15, 20],
         },
     },
 }
@@ -314,23 +326,30 @@ def load_data():
     y_tv = df[TARGET].values[train_mask]
     X_te = df[feat_cols].values[test_mask]
     y_te = df[TARGET].values[test_mask]
+    lr_tv = df['log_return'].values[train_mask]
     lr_te = df['log_return'].values[test_mask]
     dates_te = df.index[test_mask]
 
     SVR_EPS = round(0.25 * float(np.std(y_tv)), 6)
     print(f'  trainval: {len(X_tv)} rows | test: {len(X_te)} rows | '
           f'features: {len(feat_cols)} | SVR_epsilon: {SVR_EPS}')
-    return X_tv, y_tv, X_te, y_te, lr_te, dates_te, feat_cols, SVR_EPS, meta
+    return X_tv, y_tv, X_te, y_te, lr_tv, lr_te, dates_te, feat_cols, SVR_EPS, meta
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TRADING METRICS (signal dir acc)
 # ══════════════════════════════════════════════════════════════════════════════
-def trading_metrics(preds, log_rets, y_true):
+def trading_metrics(preds, log_rets, y_true, zscore_win=None):
+    if zscore_win is None:
+        zscore_win = ZSCORE_WIN
+    # Ensure numpy arrays so [-1] indexing always works (pandas Series would raise KeyError: -1)
+    preds    = np.asarray(preds)
+    log_rets = np.asarray(log_rets)
+    y_true   = np.asarray(y_true)
     n   = min(len(preds), len(log_rets), len(y_true))
     ps  = pd.Series(preds[:n])
-    z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
+    z   = (ps - ps.rolling(zscore_win, min_periods=1).mean()) / ps.rolling(zscore_win, min_periods=1).std().fillna(1e-8)
     sig = np.where(z > 0, 1, -1).astype(float)
-    lr  = np.array(log_rets[:n])
+    lr  = log_rets[:n]
     st  = sig * lr
     eq  = np.exp(np.cumsum(st))
     mkt = np.sign(lr)
@@ -347,54 +366,60 @@ def trading_metrics(preds, log_rets, y_true):
 # ══════════════════════════════════════════════════════════════════════════════
 # SKLEARN TUNING
 # ══════════════════════════════════════════════════════════════════════════════
-def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
+def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, lr_tv, lr_te, SVR_EPS):
     tscv = TimeSeriesSplit(n_splits=5)
+
+    # Separate zscore_win from model hyperparameters (it's a signal param, not a model param)
+    zscore_win_vals = grid.pop('zscore_win', [ZSCORE_WIN])
+    model_grid = grid  # remaining params are genuine model hyperparameters
 
     if model_name == 'Ridge':
         base = Ridge()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'Lasso':
         base = Lasso()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_lin':
         base = LinearSVR(epsilon=SVR_EPS, max_iter=10000, dual=True)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_rbf':
         base = SVR(kernel='rbf', epsilon=SVR_EPS)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'XGBoost':
         base = xgb.XGBRegressor(random_state=SEED, verbosity=0)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'RandomForest':
         base = RandomForestRegressor(random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'MLP':
         base = MLPRegressor(max_iter=500, random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'ElasticNet':
         base = ElasticNet(max_iter=5000)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'LightGBM':
         if not LIGHTGBM_AVAILABLE:
             raise ImportError('lightgbm not installed')
         base = lgb.LGBMRegressor(random_state=SEED, verbose=-1)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     else:
         raise ValueError(f'Unknown sklearn model: {model_name}')
 
     pipe = Pipeline([('scaler', StandardScaler()), ('model', base)])
-    total = 1
-    for v in grid.values():
-        total *= len(v)
-    print(f'  Grid size: {total} combinations × 5 folds = {total*5} fits')
+    total_model = 1
+    for v in model_grid.values():
+        total_model *= len(v)
+    total = total_model * len(zscore_win_vals)
+    print(f'  Model grid size: {total_model} combinations × 5 folds = {total_model*5} fits')
+    print(f'  zscore_win candidates: {zscore_win_vals}  (total combos: {total})')
 
     t0 = time.time()
     gs = GridSearchCV(pipe, pg, cv=tscv, scoring='neg_mean_squared_error',
                       n_jobs=N_JOBS, refit=True, verbose=1)
     gs.fit(X_tv, y_tv)
-    elapsed = time.time() - t0
+    elapsed_gs = time.time() - t0
 
-    # Print full results sorted by CV MSE
+    # Print full model grid results sorted by CV MSE
     print(f'\n  All results (sorted by CV MSE):')
     res = sorted(zip(gs.cv_results_['params'], gs.cv_results_['mean_test_score']),
                  key=lambda x: -x[1])
@@ -404,16 +429,53 @@ def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
     if len(res) > 20:
         print(f'    ... ({len(res)-20} more)')
 
-    best_params = {k.replace('model__', ''): v for k, v in gs.best_params_.items()}
+    best_model_params = {k.replace('model__', ''): v for k, v in gs.best_params_.items()}
     best_cv_mse = -gs.best_score_
-    print(f'\n  Best params : {best_params}')
-    print(f'  Best CV MSE : {best_cv_mse:.8f}')
-    print(f'  Elapsed     : {elapsed:.1f}s')
+    print(f'\n  Best model params : {best_model_params}')
+    print(f'  Best CV MSE       : {best_cv_mse:.8f}')
+    print(f'  GridSearchCV time : {elapsed_gs:.1f}s')
 
-    # Evaluate on test set
+    # ── Secondary CV to pick best zscore_win (using OOF preds from best estimator) ──
+    # Collect OOF predictions from the best model via TimeSeriesSplit on trainval
+    print(f'\n  Tuning zscore_win via OOF CV Sharpe...')
+    oof_preds    = np.full(len(y_tv), np.nan)
+    oof_log_rets = np.full(len(y_tv), np.nan)
+    best_pipe_clone = gs.best_estimator_
+    for tr_idx, va_idx in tscv.split(X_tv):
+        # Refit the pipeline on fold train (re-scaling + model)
+        fold_pipe = Pipeline([
+            ('scaler', StandardScaler()),
+            ('model',  best_pipe_clone.named_steps['model'].__class__(
+                **{k: v for k, v in best_pipe_clone.named_steps['model'].get_params().items()}
+            ))
+        ])
+        fold_pipe.fit(X_tv[tr_idx], y_tv[tr_idx])
+        oof_preds[va_idx]    = fold_pipe.predict(X_tv[va_idx])
+        oof_log_rets[va_idx] = lr_tv[va_idx]
+
+    # Drop leading NaNs from first fold's gap
+    valid_mask     = ~np.isnan(oof_preds)
+    oof_preds_v    = oof_preds[valid_mask]
+    oof_log_rets_v = oof_log_rets[valid_mask]
+    oof_y_true_v   = y_tv[valid_mask]
+
+    zscore_win_sharpes = {}
+    for zw in zscore_win_vals:
+        m_oof = trading_metrics(oof_preds_v, oof_log_rets_v, oof_y_true_v, zscore_win=zw)
+        zscore_win_sharpes[zw] = m_oof['Sharpe']
+        print(f'    zscore_win={zw:>3}  OOF Sharpe={m_oof["Sharpe"]:+.4f}')
+
+    best_zscore_win = max(zscore_win_sharpes, key=zscore_win_sharpes.get)
+    print(f'  Best zscore_win: {best_zscore_win}  (OOF Sharpe={zscore_win_sharpes[best_zscore_win]:.4f})')
+
+    best_params = {**best_model_params, 'zscore_win': best_zscore_win}
+    elapsed = time.time() - t0
+    print(f'  Total elapsed   : {elapsed:.1f}s')
+
+    # Evaluate on test set using best model + best zscore_win
     y_pred = gs.best_estimator_.predict(X_te)
-    m = trading_metrics(y_pred, log_rets, y_te)
-    print(f'\n  Test metrics:')
+    m = trading_metrics(y_pred, lr_te, y_te, zscore_win=best_zscore_win)
+    print(f'\n  Test metrics (zscore_win={best_zscore_win}):')
     for k, v in m.items():
         print(f'    {k:<12} {v:.6f}')
 
@@ -422,7 +484,7 @@ def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
 # ══════════════════════════════════════════════════════════════════════════════
 # KERAS TUNING
 # ══════════════════════════════════════════════════════════════════════════════
-def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
+def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, lr_tv, lr_te):
     from tensorflow.keras.models import Sequential
     from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Dense, Dropout
     from tensorflow.keras.callbacks import EarlyStopping
@@ -463,10 +525,14 @@ def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
     epochs  = PARAM_CATALOGUE[model_name]['fixed']['epochs']
     patience= PARAM_CATALOGUE[model_name]['fixed']['patience']
 
+    # Separate zscore_win from Keras architecture params
+    zscore_win_vals = grid.pop('zscore_win', [ZSCORE_WIN])
+
     param_names = list(grid.keys())
     param_vals  = list(grid.values())
     combos      = list(iterproduct(*param_vals))
-    print(f'  Grid size: {len(combos)} combinations × 5 folds = {len(combos)*5} fits')
+    print(f'  Model grid size: {len(combos)} combinations × 5 folds = {len(combos)*5} fits')
+    print(f'  zscore_win candidates: {zscore_win_vals}')
 
     sc = StandardScaler()
     X_tv_s = sc.fit_transform(X_tv)
@@ -496,31 +562,68 @@ def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
         print(f'  {str(params):<60}  CV MSE={cv_mse:.8f}')
 
     all_results.sort(key=lambda x: x[1])
-    best_params, best_cv_mse = all_results[0]
-    elapsed = time.time() - t0
+    best_arch_params, best_cv_mse = all_results[0]
+    elapsed_arch = time.time() - t0
 
     print(f'\n  All results (sorted):')
     for params, mse in all_results:
-        mark = ' ← BEST' if params == best_params else ''
+        mark = ' ← BEST' if params == best_arch_params else ''
         print(f'    {str(params):<60}  CV MSE={mse:.8f}{mark}')
 
-    print(f'\n  Best params : {best_params}')
-    print(f'  Best CV MSE : {best_cv_mse:.8f}')
-    print(f'  Elapsed     : {elapsed:.1f}s')
+    print(f'\n  Best arch params : {best_arch_params}')
+    print(f'  Best CV MSE      : {best_cv_mse:.8f}')
+    print(f'  Arch search time : {elapsed_arch:.1f}s')
+
+    # ── Collect OOF preds from best arch to tune zscore_win ──────────────────
+    print(f'\n  Tuning zscore_win via OOF CV Sharpe...')
+    ts_best   = best_arch_params['timesteps']
+    units_best = best_arch_params.get('units', 32)
+    drop_best  = best_arch_params.get('dropout', 0.3)
+    rdrop_best = best_arch_params.get('recurrent_dropout', 0.2)
+
+    oof_preds    = []
+    oof_log_rets = []
+    oof_y_true   = []
+    for tr, va in tscv.split(X_tv_s):
+        Xtr, ytr = make_sequences(X_tv_s[tr], y_tv[tr], ts_best)
+        Xva, yva = make_sequences(X_tv_s[va], y_tv[va], ts_best)
+        if len(Xva) == 0: continue
+        fold_m = build(model_name, units_best, drop_best, rdrop_best, X_tv.shape[1], ts_best)
+        fold_m.fit(Xtr, ytr, epochs=epochs, batch_size=32, verbose=0,
+                   callbacks=[EarlyStopping(patience=patience, restore_best_weights=True)])
+        fold_preds = fold_m.predict(Xva, verbose=0).flatten()
+        oof_preds.extend(fold_preds)
+        # va indices for log_rets: sequences start at ts_best within va split
+        va_global = va[ts_best:ts_best + len(fold_preds)]
+        oof_log_rets.extend(lr_tv[va_global])
+        oof_y_true.extend(yva)
+
+    oof_preds    = np.array(oof_preds)
+    oof_log_rets = np.array(oof_log_rets)
+    oof_y_true   = np.array(oof_y_true)
+
+    zscore_win_sharpes = {}
+    for zw in zscore_win_vals:
+        m_oof = trading_metrics(oof_preds, oof_log_rets, oof_y_true, zscore_win=zw)
+        zscore_win_sharpes[zw] = m_oof['Sharpe']
+        print(f'    zscore_win={zw:>3}  OOF Sharpe={m_oof["Sharpe"]:+.4f}')
+
+    best_zscore_win = max(zscore_win_sharpes, key=zscore_win_sharpes.get)
+    print(f'  Best zscore_win: {best_zscore_win}  (OOF Sharpe={zscore_win_sharpes[best_zscore_win]:.4f})')
+
+    best_params = {**best_arch_params, 'zscore_win': best_zscore_win}
+    elapsed = time.time() - t0
+    print(f'  Total elapsed   : {elapsed:.1f}s')
 
     # Final fit on full trainval and evaluate on test
-    ts    = best_params['timesteps']
-    units = best_params.get('units', 32)
-    drop  = best_params.get('dropout', 0.3)
-    rdrop = best_params.get('recurrent_dropout', 0.2)
-    final_m = build(model_name, units, drop, rdrop, X_tv.shape[1], ts)
-    Xtv_sq, ytv_sq = make_sequences(X_tv_s, y_tv, ts)
-    Xte_sq, yte_sq = make_sequences(X_te_s, y_te, ts)
+    final_m = build(model_name, units_best, drop_best, rdrop_best, X_tv.shape[1], ts_best)
+    Xtv_sq, ytv_sq = make_sequences(X_tv_s, y_tv, ts_best)
+    Xte_sq, yte_sq = make_sequences(X_te_s, y_te, ts_best)
     final_m.fit(Xtv_sq, ytv_sq, epochs=epochs, batch_size=32, verbose=0,
                 callbacks=[EarlyStopping(patience=patience, restore_best_weights=True)])
     y_pred = final_m.predict(Xte_sq, verbose=0).flatten()
-    m = trading_metrics(y_pred, log_rets[ts:], y_te[ts:])
-    print(f'\n  Test metrics:')
+    m = trading_metrics(y_pred, lr_te[ts_best:], y_te[ts_best:], zscore_win=best_zscore_win)
+    print(f'\n  Test metrics (zscore_win={best_zscore_win}):')
     for k, v in m.items():
         print(f'    {k:<12} {v:.6f}')
 
@@ -583,14 +686,14 @@ if __name__ == '__main__':
     print(f'{"="*60}\n')
 
     print('Loading data...')
-    X_tv, y_tv, X_te, y_te, log_rets, dates_te, feat_cols, SVR_EPS, meta = load_data()
+    X_tv, y_tv, X_te, y_te, lr_tv, lr_te, dates_te, feat_cols, SVR_EPS, meta = load_data()
 
     if cfg['type'] in ('sklearn', 'sklearn_pipeline'):
         best_params, best_cv_mse, test_m = tune_sklearn(
-            model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS)
+            model_name, grid, X_tv, y_tv, X_te, y_te, lr_tv, lr_te, SVR_EPS)
     elif cfg['type'] == 'keras':
         best_params, best_cv_mse, test_m = tune_keras(
-            model_name, grid, X_tv, y_tv, X_te, y_te, log_rets)
+            model_name, grid, X_tv, y_tv, X_te, y_te, lr_tv, lr_te)
 
     # Save per-model result (safe for parallel runs — no shared file writes)
     result = {'model': model_name, 'best_params': best_params,
