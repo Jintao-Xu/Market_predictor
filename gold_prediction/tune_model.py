@@ -332,12 +332,14 @@ def load_data():
 
     df.dropna(inplace=True)
 
-    # Restrict to most recent N years (rolling features computed on full history above)
-    _recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
-    df = df[df.index >= _recent_start].copy()
+    # Optionally restrict to most recent N years (rolling features computed on full history above)
+    if RECENT_YEARS > 0:
+        _recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+        df = df[df.index >= _recent_start].copy()
+        print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
 
     feat_cols  = [c for c in FEATURE_COLS if c in df.columns]
-    # Re-derive train_end from 80/20 split of the restricted window
+    # Derive train_end from 80/20 split of the (possibly restricted) window
     _n   = len(df)
     _spl = int(_n * 0.80)
     TRAIN_END_DATE = df.index[_spl - 1]
@@ -696,8 +698,13 @@ if __name__ == '__main__':
     parser.add_argument('--n-jobs', type=int, default=-1,
                         help='Parallel jobs for sklearn GridSearchCV (default: -1 = all cores). '
                              'Set to 1 or 2 when running multiple models in parallel via tune_all.py.')
+    parser.add_argument('--recent-years', type=int, default=3,
+                        help='Restrict training data to last N years (0 = full history). '
+                             'Use 3 for recent-regime models (SVR_lin, Ridge, Lasso, ElasticNet, SVR_rbf, XGBoost); '
+                             '0 for full-history models (LightGBM, RandomForest, MLP, LSTM, GRU, BiLSTM).')
     args = parser.parse_args()
     N_JOBS = args.n_jobs
+    RECENT_YEARS = args.recent_years
 
     if args.help_params:
         print_param_report()

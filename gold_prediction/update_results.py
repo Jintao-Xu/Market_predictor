@@ -54,7 +54,12 @@ SEED        = 42
 ZSCORE_WIN       = 10   # default fallback when no tuned zscore_win available
 SIGNAL_THRESHOLD = 0.0  # default fallback when no tuned signal_threshold available
 SHARPE_THRESH = 7.5
-RECENT_YEARS = 3   # restrict to last N years (must match train.py)
+RECENT_YEARS = 3   # data window for recent-regime models
+
+# Models trained on recent 3yr window (tuned with exp/recent-3yr params)
+RECENT_MODELS = {'Ridge', 'Lasso', 'SVR_lin', 'SVR_rbf', 'XGBoost', 'ElasticNet'}
+# Models trained on full history (tuned with exp/sharpe-cv params)
+FULL_MODELS   = {'LightGBM', 'RandomForest', 'MLP', 'LSTM', 'GRU', 'BiLSTM'}
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -202,48 +207,98 @@ if HAS_COT:
     df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
 
 df.dropna(inplace=True)
-
-# Restrict to most recent N years (rolling features computed on full history above)
-_recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
-df = df[df.index >= _recent_start].copy()
-print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
-
 FEATURE_COLS = [c for c in FEATURE_COLS if c in df.columns]
-X = df[FEATURE_COLS].values
-y = df['frac_diff_log_Gold'].values
-dates = df.index
-n = len(X); split = int(n * 0.80)
-X_trainval, y_trainval = X[:split], y[:split]
-X_test,     y_test     = X[split:], y[split:]
-dates_test             = dates[split:]
-log_ret_test           = df['log_return'].values[split:]
-gold_test              = df['Gold'].values[split:]
 
-SVR_EPSILON = round(0.25 * float(np.std(y_trainval)), 6)
-print(f'  Test: {dates_test[0].date()} → {dates_test[-1].date()}  ({len(X_test)} days)')
-print(f'  SVR epsilon: {SVR_EPSILON}')
+# ── Full-history split (for LightGBM, RandomForest, MLP, LSTM, GRU, BiLSTM) ─
+_X_full  = df[FEATURE_COLS].values
+_y_full  = df['frac_diff_log_Gold'].values
+_dates   = df.index
+_lr_full = df['log_return'].values
+_gold_full = df['Gold'].values
+_n_full  = len(_X_full)
+_spl_full = int(_n_full * 0.80)
 
-sc = StandardScaler()
-X_tv_s = sc.fit_transform(X_trainval)
-X_te_s = sc.transform(X_test)
+X_tv_full, y_tv_full = _X_full[:_spl_full], _y_full[:_spl_full]
+X_te_full, y_te_full = _X_full[_spl_full:], _y_full[_spl_full:]
+dates_te_full         = _dates[_spl_full:]
+lr_te_full            = _lr_full[_spl_full:]
+
+SVR_EPS_FULL = round(0.25 * float(np.std(y_tv_full)), 6)
+sc_full = StandardScaler()
+X_tv_full_s = sc_full.fit_transform(X_tv_full)
+X_te_full_s = sc_full.transform(X_te_full)
+
+# ── Recent-window split (for Ridge, Lasso, SVR_lin, SVR_rbf, XGBoost, ElasticNet) ─
+_rec_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+df_rec     = df[df.index >= _rec_start].copy()
+_X_rec     = df_rec[FEATURE_COLS].values
+_y_rec     = df_rec['frac_diff_log_Gold'].values
+_dates_rec = df_rec.index
+_lr_rec    = df_rec['log_return'].values
+_gold_rec  = df_rec['Gold'].values
+_n_rec     = len(_X_rec)
+_spl_rec   = int(_n_rec * 0.80)
+
+X_tv_rec, y_tv_rec = _X_rec[:_spl_rec], _y_rec[:_spl_rec]
+X_te_rec, y_te_rec = _X_rec[_spl_rec:], _y_rec[_spl_rec:]
+dates_te_rec        = _dates_rec[_spl_rec:]   # 2025-09-24 → 2026-05-01
+lr_te_rec           = _lr_rec[_spl_rec:]
+gold_te_rec         = _gold_rec[_spl_rec:]
+
+SVR_EPS_REC = round(0.25 * float(np.std(y_tv_rec)), 6)
+sc_rec = StandardScaler()
+X_tv_rec_s = sc_rec.fit_transform(X_tv_rec)
+X_te_rec_s = sc_rec.transform(X_te_rec)
+
+# ── Common evaluation period = recent test (2025-09-24 → 2026-05-01) ─────────
+EVAL_START  = dates_te_rec[0]
+dates_test  = dates_te_rec          # all plots use this
+gold_test   = gold_te_rec
+
+# For full models: index in their test set where the eval period begins
+_eval_mask_full  = dates_te_full >= EVAL_START
+EVAL_OFFSET_FULL = int(np.where(_eval_mask_full)[0][0])
+
+SVR_EPSILON = SVR_EPS_REC   # used for recent SVR models
+print(f'  Recent test ({RECENT_YEARS}yr): {dates_te_rec[0].date()} → {dates_te_rec[-1].date()}  ({len(X_te_rec)} days)')
+print(f'  Full test:         {dates_te_full[0].date()} → {dates_te_full[-1].date()}  ({len(X_te_full)} days)')
+print(f'  Common eval start: {EVAL_START.date()}  (offset in full test: {EVAL_OFFSET_FULL})')
+print(f'  SVR eps — recent: {SVR_EPS_REC}  full: {SVR_EPS_FULL}')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. FIT ALL MODELS + COLLECT METRICS
 # ══════════════════════════════════════════════════════════════════════════════
-def trading_metrics(preds, log_rets, zscore_win=None, threshold=None):
+def trading_metrics(preds, log_rets, y_true, zscore_win=None, threshold=None,
+                    warmup_preds=None):
+    """Compute trading metrics on preds/log_rets.
+
+    warmup_preds: optional array prepended to preds before z-score computation
+    so that rolling statistics have warmup context (used for full-history models
+    where predictions exist before the common eval period).
+    Signal is computed on the full concatenated array then sliced to len(preds).
+    """
     if zscore_win is None:
         zscore_win = ZSCORE_WIN
     if threshold is None:
         threshold = SIGNAL_THRESHOLD
-    # Ensure numpy arrays so [-1] indexing always works (pandas Series would raise KeyError: -1)
     preds    = np.asarray(preds)
     log_rets = np.asarray(log_rets)
-    n_ = len(preds)
-    ps  = pd.Series(preds)
+    y_true   = np.asarray(y_true)
+
+    # Build prediction array for z-score (with optional warmup prefix)
+    if warmup_preds is not None and len(warmup_preds) > 0:
+        all_p = np.concatenate([np.asarray(warmup_preds), preds])
+    else:
+        all_p = preds
+
+    ps  = pd.Series(all_p)
     z   = (ps - ps.rolling(zscore_win, min_periods=1).mean()) / \
           ps.rolling(zscore_win, min_periods=1).std().fillna(1e-8)
-    sig = np.where(z >  threshold,  1.0,
-          np.where(z < -threshold, -1.0, 0.0))
+    sig_all = np.where(z >  threshold,  1.0,
+              np.where(z < -threshold, -1.0, 0.0))
+    sig = sig_all[-len(preds):]   # slice to eval period
+
+    n_ = len(preds)
     strat  = sig * log_rets[:n_]
     eq     = np.exp(np.cumsum(strat))
     cagr   = (eq[-1] ** (252 / n_) - 1) * 100
@@ -257,7 +312,7 @@ def trading_metrics(preds, log_rets, zscore_win=None, threshold=None):
     active  = sig != 0
     dir_acc  = float(np.mean(sig[active] == mkt_dir[active])) if active.any() else 0.0
     coverage = float(np.mean(active))
-    mse      = mean_squared_error(y_test[:n_], preds)
+    mse      = mean_squared_error(y_true[:n_], preds)
     return dict(Sharpe=sharpe, CAGR=cagr, PF=pf, MaxDD=max_dd,
                 DirAcc=dir_acc, Coverage=coverage, MSE=mse,
                 equity=eq, signal=sig, preds=np.array(preds))
@@ -281,9 +336,9 @@ print('\nFitting sklearn models with tuned params...')
 SK_CONFIGS = {
     'Ridge':        Ridge(**model_params('Ridge')),
     'Lasso':        Lasso(**model_params('Lasso')),
-    'SVR_lin':      LinearSVR(C=model_params('SVR_lin')['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True),
+    'SVR_lin':      LinearSVR(C=model_params('SVR_lin')['C'], epsilon=SVR_EPS_REC, max_iter=10000, dual=True),
     'SVR_rbf':      SVR(kernel='rbf', C=model_params('SVR_rbf')['C'],
-                        gamma=model_params('SVR_rbf')['gamma'], epsilon=SVR_EPSILON),
+                        gamma=model_params('SVR_rbf')['gamma'], epsilon=SVR_EPS_REC),
     'XGBoost':      xgb.XGBRegressor(**model_params('XGBoost'), random_state=SEED, verbosity=0),
     'RandomForest': RandomForestRegressor(**model_params('RandomForest'), random_state=SEED),
     'MLP':          MLPRegressor(**{k: tuple(v) if isinstance(v, list) else v
@@ -295,14 +350,36 @@ if LIGHTGBM_AVAILABLE:
     SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**model_params('LightGBM'), random_state=SEED, verbose=-1)
 sk_fitted = {}
 for name, model in SK_CONFIGS.items():
-    model.fit(X_tv_s, y_trainval)
-    preds = model.predict(X_te_s)
+    is_recent = name in RECENT_MODELS
+    # Select the right training/test split and scaler
+    _X_tv_s = X_tv_rec_s  if is_recent else X_tv_full_s
+    _y_tv   = y_tv_rec    if is_recent else y_tv_full
+    _X_te_s = X_te_rec_s  if is_recent else X_te_full_s
+    _y_te   = y_te_rec    if is_recent else y_te_full
+    _lr_te  = lr_te_rec   if is_recent else lr_te_full
+    tag     = f'recent-{RECENT_YEARS}yr' if is_recent else 'full-hist'
+
+    model.fit(_X_tv_s, _y_tv)
+    preds_all = model.predict(_X_te_s)
     zw  = ZSCORE_WINS.get(name, ZSCORE_WIN)
     thr = THRESHOLDS.get(name, SIGNAL_THRESHOLD)
-    m = trading_metrics(preds, log_ret_test, zscore_win=zw, threshold=thr)
-    all_metrics[name] = m; all_preds[name] = preds; all_signals[name] = m['signal']
-    sk_fitted[name] = model
-    print(f'  {name:<22} Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
+
+    if is_recent:
+        # Full test = eval period
+        m = trading_metrics(preds_all, _lr_te, _y_te, zscore_win=zw, threshold=thr)
+        preds_eval = preds_all
+    else:
+        # Use predictions before EVAL_START as z-score warmup, slice to eval period for metrics
+        warmup = preds_all[:EVAL_OFFSET_FULL]
+        preds_eval = preds_all[EVAL_OFFSET_FULL:]
+        m = trading_metrics(preds_eval, _lr_te[EVAL_OFFSET_FULL:], _y_te[EVAL_OFFSET_FULL:],
+                            zscore_win=zw, threshold=thr, warmup_preds=warmup)
+
+    all_metrics[name] = m
+    all_preds[name]   = preds_eval
+    all_signals[name] = m['signal']
+    sk_fitted[name]   = model
+    print(f'  {name:<22} [{tag}] Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
           f'Coverage={m["Coverage"]*100:.1f}%  zscore_win={zw}  threshold={thr}  params={TUNED[name]}')
 
 # ── Keras models ───────────────────────────────────────────────────────────────
@@ -324,18 +401,20 @@ def directional_mse(y_true, y_pred):
 
 keras_fitted = {}
 for model_name, build_info in [
-    ('LSTM',   ('lstm',   TUNED['LSTM'])),
-    ('GRU',    ('gru',    TUNED['GRU'])),
-    ('BiLSTM', ('bilstm', TUNED['BiLSTM'])),
+    ('LSTM',   TUNED['LSTM']),
+    ('GRU',    TUNED['GRU']),
+    ('BiLSTM', TUNED['BiLSTM']),
 ]:
-    p  = build_info[1]
+    # All Keras models are FULL_MODELS — trained on full history
+    p  = build_info
     ts = p['timesteps']; units = p['units']
     drop = p['dropout']; rdrop = p['recurrent_dropout']
-    n_feat = X_trainval.shape[1]
+    n_feat = X_tv_full_s.shape[1]
 
-    Xtv_sq, ytv_sq = make_sequences(X_tv_s, y_trainval, ts)
-    Xte_sq, yte_sq = make_sequences(X_te_s, y_test,     ts)
-    lr_test = log_ret_test[ts:]
+    Xtv_sq, ytv_sq = make_sequences(X_tv_full_s, y_tv_full, ts)
+    Xte_sq, yte_sq = make_sequences(X_te_full_s, y_te_full, ts)
+    lr_seq_full  = lr_te_full[ts:]
+    dates_seq_full = dates_te_full[ts:]
 
     if model_name == 'LSTM':
         m = Sequential([KerasLSTM(units, input_shape=(ts, n_feat),
@@ -353,22 +432,32 @@ for model_name, build_info in [
           callbacks=[EarlyStopping(patience=10, restore_best_weights=True)],
           validation_split=0.1)
 
-    preds = m.predict(Xte_sq, verbose=0).flatten()
+    preds_all_seq = m.predict(Xte_sq, verbose=0).flatten()
     zw  = ZSCORE_WINS.get(model_name, ZSCORE_WIN)
     thr = THRESHOLDS.get(model_name, SIGNAL_THRESHOLD)
-    met   = trading_metrics(preds, lr_test, zscore_win=zw, threshold=thr)
+
+    # Slice to common eval period with z-score warmup
+    eval_mask_seq = dates_seq_full >= EVAL_START
+    eval_off_seq  = int(np.where(eval_mask_seq)[0][0]) if eval_mask_seq.any() else 0
+    warmup_seq    = preds_all_seq[:eval_off_seq]
+    preds_eval_seq = preds_all_seq[eval_off_seq:]
+    lr_eval_seq    = lr_seq_full[eval_off_seq:]
+    y_eval_seq     = yte_sq[eval_off_seq:]
+
+    met = trading_metrics(preds_eval_seq, lr_eval_seq, y_eval_seq,
+                          zscore_win=zw, threshold=thr, warmup_preds=warmup_seq)
     all_metrics[model_name] = met
-    all_preds[model_name]   = preds
+    all_preds[model_name]   = preds_eval_seq
     all_signals[model_name] = met['signal']
     keras_fitted[model_name] = (m, ts)
-    print(f'  {model_name:<22} Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  '
+    print(f'  {model_name:<22} [full-hist] Sharpe={met["Sharpe"]:6.3f}  DirAcc={met["DirAcc"]*100:.1f}%  '
           f'Coverage={met["Coverage"]*100:.1f}%  ts={ts}  zscore_win={zw}  threshold={thr}')
 
-# Buy & Hold
-bnh_eq     = np.exp(np.cumsum(log_ret_test))
-bnh_cagr   = (bnh_eq[-1] ** (252/len(log_ret_test)) - 1) * 100
-bnh_sharpe = log_ret_test.mean() / (log_ret_test.std() + 1e-12) * np.sqrt(252)
-bnh_up     = float(np.mean(log_ret_test > 0))
+# Buy & Hold — common eval period (recent test window)
+bnh_eq     = np.exp(np.cumsum(lr_te_rec))
+bnh_cagr   = (bnh_eq[-1] ** (252/len(lr_te_rec)) - 1) * 100
+bnh_sharpe = lr_te_rec.mean() / (lr_te_rec.std() + 1e-12) * np.sqrt(252)
+bnh_up     = float(np.mean(lr_te_rec > 0))
 
 # Best model by Sharpe
 best_name = max(all_metrics, key=lambda n: all_metrics[n]['Sharpe'])
@@ -552,7 +641,7 @@ for name in MODEL_ORDER:
     m  = all_metrics[name]
     p  = all_preds[name]
     n_ = min(len(p), len(dates_test))
-    ax.plot(dates_test[:n_], y_test[:n_], color='steelblue', lw=0.6,
+    ax.plot(dates_test[:n_], y_te_rec[:n_], color='steelblue', lw=0.6,
             alpha=0.7, label='Actual')
     ax.plot(dates_test[:n_], p, color='tomato', lw=0.8,
             alpha=0.85, label='Predicted')
@@ -613,18 +702,21 @@ print(f'Saved → {RESULTS_DIR}/signal_timeline.png')
 # ══════════════════════════════════════════════════════════════════════════════
 print(f'Computing SHAP for best model ({best_name})...')
 best_model_obj = sk_fitted.get(best_name)
-X_te_shap = X_te_s
+# SHAP uses whichever split the best model was trained on
+_is_rec_best = best_name in RECENT_MODELS
+X_te_shap = X_te_rec_s  if _is_rec_best else X_te_full_s[EVAL_OFFSET_FULL:]
+X_tv_shap = X_tv_rec_s  if _is_rec_best else X_tv_full_s
 
 try:
     if best_name in ['XGBoost', 'RandomForest']:
         explainer = shap.TreeExplainer(best_model_obj)
         shap_vals = explainer.shap_values(X_te_shap)
     elif best_name in ['Ridge', 'Lasso', 'SVR_lin']:
-        masker    = shap.maskers.Independent(X_tv_s, max_samples=200)
+        masker    = shap.maskers.Independent(X_tv_shap, max_samples=200)
         explainer = shap.LinearExplainer(best_model_obj, masker)
         shap_vals = explainer.shap_values(X_te_shap)
     else:
-        masker    = shap.maskers.Independent(X_tv_s, max_samples=100)
+        masker    = shap.maskers.Independent(X_tv_shap, max_samples=100)
         explainer = shap.PermutationExplainer(best_model_obj.predict, masker)
         shap_vals = explainer(X_te_shap[:200]).values
 
@@ -646,7 +738,7 @@ except Exception as e:
 print(f'Running bias tests for best model ({best_name})...')
 best_sig  = all_metrics[best_name]['signal']
 n_sig     = len(best_sig)
-strat_ret = best_sig * log_ret_test[:n_sig]
+strat_ret = best_sig * lr_te_rec[:n_sig]
 obs_sharpe = strat_ret.mean() / (strat_ret.std() + 1e-12) * np.sqrt(252)
 
 # MC permutation test
@@ -654,7 +746,7 @@ N_PERM = 1000
 perm_sharpes = []
 for _ in range(N_PERM):
     perm = np.random.permutation(best_sig)
-    s    = perm * log_ret_test[:n_sig]
+    s    = perm * lr_te_rec[:n_sig]
     perm_sharpes.append(s.mean() / (s.std() + 1e-12) * np.sqrt(252))
 mc_pval = float(np.mean(np.array(perm_sharpes) >= obs_sharpe))
 
@@ -668,7 +760,7 @@ def _wrc_statistic(sig, log_rets, n_boot=1000, block_len=20):
         boot.append((strat[idx]).mean())
     return obs, np.array(boot), float(np.mean(np.array(boot) >= obs))
 
-obs_wrc, null_wrc, wrc_pval = _wrc_statistic(best_sig, log_ret_test)
+obs_wrc, null_wrc, wrc_pval = _wrc_statistic(best_sig, lr_te_rec)
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.hist(perm_sharpes, bins=40, color='steelblue', alpha=0.75, edgecolor='white')
