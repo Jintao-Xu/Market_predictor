@@ -1,0 +1,107 @@
+{
+  "pipeline": "directional_classification",
+  "target": "log_return_direction (1=UP, 0=DOWN)",
+  "cv_metric": "balanced_accuracy",
+  "features": [
+    "NonComm_Positions_Long_All",
+    "NonRept_Positions_Short_All",
+    "net_commercial",
+    "net_speculator",
+    "net_nonreport",
+    "comm_pct_OI",
+    "spec_pct_OI",
+    "net_comm_chg",
+    "net_spec_chg",
+    "OI_chg",
+    "comm_ma20",
+    "spec_ma20",
+    "comm_spec_spread",
+    "cot_norm_spec",
+    "cot_norm_comm",
+    "Comm_Positions_Long_All_diff",
+    "DXY",
+    "DXY_chg",
+    "DXY_ma20",
+    "DXY_vs_ma20",
+    "VIX",
+    "VIX_zscore",
+    "TNX_yield",
+    "TYX_yield",
+    "yield_spread",
+    "real_yield_px",
+    "RSI_14",
+    "RSI_28",
+    "ROC_10",
+    "ROC_20",
+    "MOM_5",
+    "MACD_diff",
+    "BB_width",
+    "BB_pct",
+    "target_lag1",
+    "target_lag2",
+    "target_lag3",
+    "target_lag5",
+    "target_lag10"
+  ],
+  "frac_d": 0.5,
+  "split_date": "2022-06-22",
+  "test_up_pct": 0.5499485066941298,
+  "tuned_params": {
+    "LogReg_L2": {
+      "C": 100
+    },
+    "LogReg_L1": {
+      "C": 10
+    },
+    "SVC_lin": {
+      "C": 10
+    },
+    "SVC_rbf": {
+      "C": 10,
+      "gamma": 0.001
+    },
+    "RF_clf": {
+      "max_depth": 10,
+      "min_samples_split": 2,
+      "n_estimators": 200
+    },
+    "XGB_clf": {
+      "learning_rate": 0.1,
+      "max_depth": 2,
+      "n_estimators": 200,
+      "subsample": 0.8
+    },
+    "MLP_clf": {
+      "alpha": 0.001,
+      "hidden_layer_sizes": [
+        128,
+        64,
+        32
+      ],
+      "learning_rate_init": 0.001
+    }
+  },
+  "keras_best": {
+    "LSTM_clf": {
+      "timesteps": 15,
+      "units": 32,
+      "dropout": 0.2,
+      "recurrent_dropout": 0.0,
+      "cv_balacc": 0.5140837912516079
+    },
+    "GRU_clf": {
+      "timesteps": 15,
+      "units": 64,
+      "dropout": 0.2,
+      "recurrent_dropout": 0.0,
+      "cv_balacc": 0.5193292875835838
+    },
+    "BiLSTM_clf": {
+      "timesteps": 15,
+      "units": 16,
+      "dropout": 0.4,
+      "recurrent_dropout": 0.0,
+      "cv_balacc": 0.5154830039919208
+    }
+  }
+}

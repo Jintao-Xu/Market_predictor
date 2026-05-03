@@ -1,0 +1,264 @@
+{
+  "target": "frac_diff_log_Gold",
+  "frac_d": 0.5,
+  "best_model": "XGB",
+  "best_params": {
+    "learning_rate": 0.05,
+    "max_depth": 2,
+    "n_estimators": 200
+  },
+  "best_k": 30,
+  "feature_cols": [
+    "NonComm_Positions_Long_All",
+    "NonRept_Positions_Short_All",
+    "net_commercial",
+    "net_speculator",
+    "net_nonreport",
+    "comm_pct_OI",
+    "spec_pct_OI",
+    "net_comm_chg",
+    "net_spec_chg",
+    "OI_chg",
+    "comm_ma20",
+    "spec_ma20",
+    "comm_spec_spread",
+    "cot_norm_spec",
+    "cot_norm_comm",
+    "Comm_Positions_Long_All_diff",
+    "DXY",
+    "DXY_chg",
+    "DXY_ma20",
+    "DXY_vs_ma20",
+    "VIX",
+    "VIX_zscore",
+    "TNX_yield",
+    "TYX_yield",
+    "yield_spread",
+    "real_yield_px",
+    "RSI_14",
+    "RSI_28",
+    "ROC_10",
+    "ROC_20",
+    "MOM_5",
+    "MACD_diff",
+    "BB_width",
+    "BB_pct",
+    "target_lag1",
+    "target_lag2",
+    "target_lag3",
+    "target_lag5",
+    "target_lag10"
+  ],
+  "selected_features": [
+    "NonComm_Positions_Long_All",
+    "NonRept_Positions_Short_All",
+    "net_commercial",
+    "net_speculator",
+    "net_nonreport",
+    "comm_pct_OI",
+    "spec_pct_OI",
+    "net_comm_chg",
+    "net_spec_chg",
+    "comm_ma20",
+    "spec_ma20",
+    "comm_spec_spread",
+    "DXY",
+    "DXY_ma20",
+    "TNX_yield",
+    "TYX_yield",
+    "yield_spread",
+    "real_yield_px",
+    "RSI_14",
+    "RSI_28",
+    "ROC_10",
+    "ROC_20",
+    "MOM_5",
+    "MACD_diff",
+    "BB_pct",
+    "target_lag1",
+    "target_lag2",
+    "target_lag3",
+    "target_lag5",
+    "target_lag10"
+  ],
+  "timesteps_candidates": [
+    5,
+    7,
+    10,
+    15
+  ],
+  "lstm_best_timesteps": 5,
+  "gru_best_timesteps": 7,
+  "bilstm_best_timesteps": 5,
+  "timesteps": 5,
+  "has_cot": true,
+  "train_end_date": "2022-06-21",
+  "test_start_date": "2022-06-22",
+  "test_mse": 0.0007101894200254346,
+  "cagr": 2.8120104886709334,
+  "sharpe": 7.770226455141943,
+  "profit_factor": 4.483748942766207,
+  "max_drawdown": -0.07180876002383238,
+  "tuned_Ridge": {
+    "model": "Ridge",
+    "best_params": {
+      "alpha": 100.0
+    },
+    "cv_mse": 9.365653323198262e-05,
+    "MSE": 0.0016251593009433208,
+    "CAGR": 3.347987029646796,
+    "Sharpe": 8.760444213199476,
+    "PF": 5.616862580002634,
+    "MaxDD": -0.06054383957731791,
+    "DirAcc": 0.7157569515962925,
+    "PredStd": 0.023427181688338444
+  },
+  "tuned_Lasso": {
+    "model": "Lasso",
+    "best_params": {
+      "alpha": 0.001
+    },
+    "cv_mse": 9.239118403830127e-05,
+    "MSE": 0.0006387444272250873,
+    "CAGR": 2.671300138133017,
+    "Sharpe": 7.508027045039038,
+    "PF": 4.227806206797647,
+    "MaxDD": -0.060543839577317786,
+    "DirAcc": 0.6889804325437693,
+    "PredStd": 0.024366477898683937
+  },
+  "tuned_SVR_lin": {
+    "model": "SVR_lin",
+    "best_params": {
+      "C": 0.01
+    },
+    "cv_mse": 0.00014096212572203894,
+    "MSE": 0.002149606557667816,
+    "CAGR": 3.4130631743307704,
+    "Sharpe": 8.876501983120011,
+    "PF": 5.774948819848206,
+    "MaxDD": -0.060543839577317946,
+    "DirAcc": 0.7188465499485067,
+    "PredStd": 0.024911709368028674
+  },
+  "tuned_SVR_rbf": {
+    "model": "SVR_rbf",
+    "best_params": {
+      "C": 0.01,
+      "gamma": 0.001
+    },
+    "cv_mse": 8.808069719938827e-05,
+    "MSE": 0.0011231322708095673,
+    "CAGR": 3.093837377703885,
+    "Sharpe": 8.30057276701043,
+    "PF": 5.04499577812859,
+    "MaxDD": -0.060543839577317946,
+    "DirAcc": 0.7147270854788877,
+    "PredStd": 0.01617749777377231
+  },
+  "tuned_XGBoost": {
+    "model": "XGBoost",
+    "best_params": {
+      "learning_rate": 0.05,
+      "max_depth": 2,
+      "n_estimators": 200,
+      "subsample": 1.0
+    },
+    "cv_mse": 0.0001067628337728741,
+    "MSE": 0.0006916052015083012,
+    "CAGR": 2.764232547007852,
+    "Sharpe": 7.685777332595375,
+    "PF": 4.395171243819547,
+    "MaxDD": -0.07180876002383234,
+    "DirAcc": 0.694129763130793,
+    "PredStd": 0.01580151543021202
+  },
+  "tuned_RandomForest": {
+    "model": "RandomForest",
+    "best_params": {
+      "max_depth": 10,
+      "min_samples_leaf": 1,
+      "min_samples_split": 10,
+      "n_estimators": 50
+    },
+    "cv_mse": 0.0001323974803829408,
+    "MSE": 0.0007020098638737175,
+    "CAGR": 2.8128841163470724,
+    "Sharpe": 7.7780066531398075,
+    "PF": 4.485385154611781,
+    "MaxDD": -0.07180876002383224,
+    "DirAcc": 0.6961894953656025,
+    "PredStd": 0.018545024297427458
+  },
+  "tuned_MLP": {
+    "model": "MLP",
+    "best_params": {
+      "alpha": 0.01,
+      "hidden_layer_sizes": [
+        128,
+        64,
+        32
+      ],
+      "learning_rate_init": 0.01
+    },
+    "cv_mse": 0.0007439769847337066,
+    "MSE": 0.0004956159684787792,
+    "CAGR": 3.4891167368701597,
+    "Sharpe": 9.011342755103037,
+    "PF": 5.966378443298707,
+    "MaxDD": -0.060543839577317876,
+    "DirAcc": 0.7322348094747683,
+    "PredStd": 0.021703246861044755
+  },
+  "tuned_LSTM": {
+    "model": "LSTM",
+    "best_params": {
+      "timesteps": 7,
+      "units": 32,
+      "dropout": 0.5,
+      "recurrent_dropout": 0.2
+    },
+    "cv_mse": 0.00020004471187563526,
+    "MSE": 0.0008490259365977675,
+    "CAGR": 0.027094836535531464,
+    "Sharpe": 0.1390535153606037,
+    "PF": 1.0255789422980173,
+    "MaxDD": -0.2586107503874781,
+    "DirAcc": 0.5062240663900415,
+    "PredStd": 0.012131637893617153
+  },
+  "tuned_GRU": {
+    "model": "GRU",
+    "best_params": {
+      "timesteps": 15,
+      "units": 64,
+      "dropout": 0.4,
+      "recurrent_dropout": 0.0
+    },
+    "cv_mse": 0.0004915444369967437,
+    "MSE": 0.0008313199586565508,
+    "CAGR": -0.013770732143287279,
+    "Sharpe": -0.07201993346257987,
+    "PF": 0.9869992982413245,
+    "MaxDD": -0.32952613765685224,
+    "DirAcc": 0.48640167364016734,
+    "PredStd": 0.014192634262144566
+  },
+  "tuned_BiLSTM": {
+    "model": "BiLSTM",
+    "best_params": {
+      "timesteps": 10,
+      "units": 16,
+      "dropout": 0.3,
+      "recurrent_dropout": 0.2
+    },
+    "cv_mse": 0.0018654410461802716,
+    "MSE": 0.0007627038339200913,
+    "CAGR": 0.1060844992442227,
+    "Sharpe": 0.5251425403337108,
+    "PF": 1.1001953222496688,
+    "MaxDD": -0.19105743708197853,
+    "DirAcc": 0.5046826222684704,
+    "PredStd": 0.010735644027590752
+  }
+}

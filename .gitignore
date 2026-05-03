@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Logs and temp
+*.log
+/tmp/
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Large data not tracked
+# (gold_prediction/data/ is small and tracked intentionally)
+
+# Other homework dirs — not part of gold_prediction experiments
+3.HomeworkScorer_UPLOAD_UPLOAD/
+3b.HomeworkScorer_UPLOAD_UPLOAD/
+3c.HomeworkTimothyMasters_UPLOAD_UPLOAD/
+4.HomeworkFeatureSelector_UPLOAD_UPLOAD/
+4b.HomeworkFeatureSelector_UPLOAD_UPLOAD/
+5.HomeworkPCAWRC_UPLOAD_UPLOAD/
+5b.HomeworkPCAYieldCurveForecast_UPLOAD_UPLOAD/
+6b.HomeworkTimothyMasters2_UPLOAD_UPLOAD/
+7.HomeworkTimeSeriesSplitTalibWRCSVC_UPLOAD_UPLOAD/
+CLASS 14.ReinforcementLearning.O_UPLOAD/
+FeatureEngineering_DePrado/
+HomeworkCocaCola_upload/
+HomeworkPandasExercise_UPLOAD/
+Indicators/
+S11.Miscellaneous/
+S2.Miscellaneous/
+S3.Miscellaneous/
+S4.FeatureEngineering_Optional2/
+S4.Miscellaneous/
+S5.Miscellaneous/
+S6.Miscellaneous/
+S7.Miscellaneous/
+S7.Miscellaneous2_light/
+S8a.Miscellaneous/
+S8b.Miscellaneous/
+S9.Miscellaneous/
+cadusd_prediction/

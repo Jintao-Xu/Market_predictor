@@ -1,0 +1,17 @@
+{
+  "model": "RandomForest",
+  "best_params": {
+    "max_depth": 10,
+    "min_samples_leaf": 1,
+    "min_samples_split": 10,
+    "n_estimators": 50
+  },
+  "cv_mse": 0.0001323974803829408,
+  "MSE": 0.0007020098638737175,
+  "CAGR": 2.8128841163470724,
+  "Sharpe": 7.7780066531398075,
+  "PF": 4.485385154611781,
+  "MaxDD": -0.07180876002383224,
+  "DirAcc": 0.6961894953656025,
+  "PredStd": 0.018545024297427458
+}
