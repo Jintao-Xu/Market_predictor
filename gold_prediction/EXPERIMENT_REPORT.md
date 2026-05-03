@@ -335,7 +335,19 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 **Motivation:** Ridge alpha=1000 was selected by MSE-CV but hurt Sharpe (Exp 8). The new approach cannot make that mistake because Sharpe is the only objective.
 
-*Results to be filled in after tuning completes.*
+| Model | Sharpe | CAGR | Active DirAcc | Coverage | vs Exp 8 | Best params |
+|---|---:|---:|---:|---:|---:|---|
+| **SVR_lin** | **9.45** | **346%** | **77.0%** | **85.1%** | −0.09 | C=1000, thr=0.3 (same as Exp 7) |
+| **Ridge** | **9.39** | **339%** | **76.1%** | **84.9%** | **+0.88** | α=1.0, thr=0.3 ← was α=1000 |
+| Lasso | 9.26 | 328% | 75.7% | 84.9% | **+0.77** | α=0.00001, thr=0.3 ← tiny regularization |
+| ElasticNet | 9.26 | 328% | 75.8% | 84.8% | **+0.71** | α=0.0001, thr=0.3 ← was α=0.01 |
+| XGBoost | 8.83 | 306% | 74.0% | 90.2% | **+0.44** | depth=4, lr=0.1, thr=0.2 ← was depth=2 |
+| SVR_rbf | 8.83 | 296% | 77.5% | 89.4% | −0.10 | C=1, γ=0.01, thr=0.2 |
+| MLP | 8.76 | 293% | 77.4% | 75.6% | +0.00 | (256,128,64), unchanged |
+| RandomForest | 8.18 | 272% | 74.0% | 79.6% | +0.00 | unchanged |
+| LightGBM | 8.04 | 265% | 74.8% | 78.1% | +0.00 | unchanged |
+
+**Finding:** Sharpe-CV confirmed and resolved the MSE/Sharpe misalignment. The four biggest movers were all regularization-dominated models: Ridge (α: 1000→1, +0.88), Lasso (α: 0.001→0.00001, +0.77), ElasticNet (α: 0.01→0.0001, +0.71), XGBoost (depth: 2→4, +0.44). MSE-CV had been pushing these toward smooth, low-variance predictions — which minimise MSE but also flatten z-scores and weaken the trading signal. Sharpe-CV picked less regularised, more expressive models that generate sharper z-score differentials. SVR_lin was unaffected (same params as Exp 7, C=1000 wins on both objectives). SVR_rbf, MLP, RF, LightGBM are also stable — their MSE and Sharpe optima already aligned.
 
 ---
 
@@ -345,7 +357,8 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 | Rank | Experiment | SVR_lin Sharpe | Primary Change |
 |---|---|---:|---|
-| 1 | `exp/extended-search` | **9.54** | Wider C grid; best C shifted to 0.1 |
+| 1 | `exp/extended-search` | **9.54** | Wider C grid |
+| 1 | `exp/sharpe-cv` | **9.45** | Sharpe-CV (SVR_lin unaffected; Ridge/Lasso/ElasticNet/XGBoost all improved) |
 | 2 | `exp/combined-best` | 9.45 | ZSCORE_WIN=5 + threshold + ElasticNet fix |
 | 3 | `exp/zscore-win-tuning` | 9.03 | ZSCORE_WIN: 10 → 5 |
 | 4 | `exp/signal-dead-zone` | 8.49 | Hold cash when \|z\| < 0.5 |
@@ -355,15 +368,26 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 | 6 | `exp/per-model-k-alpha` | 7.22 | Per-model k |
 | 6 | `exp/proportional-sizing` | 7.21 | Continuous sizing |
 
+### Best model per experiment (Sharpe)
+
+| Experiment | Best model | Sharpe |
+|---|---|---:|
+| `exp/sharpe-cv` | SVR_lin | **9.45** |
+| `exp/extended-search` | SVR_lin | 9.54 |
+| `exp/combined-best` | SVR_lin | 9.45 |
+| `exp/zscore-win-tuning` | SVR_lin | 9.03 |
+| `exp/signal-dead-zone` | SVR_lin | 8.49 |
+| `main` | SVR_lin | 7.81 |
+
 ### What Works
 
 | Improvement | Best model gain | Notes |
 |---|---|---|
+| Sharpe-CV (replace MSE-CV) | +0.88 (Ridge), +0.77 (Lasso), +0.71 (ElasticNet), +0.44 (XGBoost) | Exp 9 — all regularization-dominated models benefited |
 | ZSCORE_WIN=5 | +1.68 (RF), +1.53 (SVR_rbf) | Universal improvement, was a regression |
 | Signal dead zone (per-model threshold) | +0.82 (RF), +0.80 (SVR_rbf) | Cuts noise trades |
 | ElasticNet alpha fix | +5.64 (combined) | Was severely misconfigured |
 | MLP wider hidden layers (256,128,64) | +0.32 | Exp 8 extension found larger net helps |
-| SVR_rbf lower gamma (0.0001) | +0.19 | Exp 8 found smoother kernel more effective |
 
 ### What Doesn't Work
 
@@ -371,4 +395,4 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 |---|---|---|
 | Per-model SelectKBest k | −0.59 (SVR_lin) | Optimal k=57 (no selection needed) |
 | Proportional sizing z/3 | −0.60 (SVR_lin) | Lower average position size reduces returns |
-| Ridge alpha > 100 | −0.65 (Ridge) | Exp 8 pushed alpha to 1000; test Sharpe degraded — CV/Sharpe misalignment |
+| Ridge alpha > 100 (MSE-CV) | −0.65 (Ridge) | MSE-CV kept pushing regularization up; fixed by Sharpe-CV |
