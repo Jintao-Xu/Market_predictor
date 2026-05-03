@@ -36,6 +36,8 @@ from sklearn.svm import SVR, LinearSVR
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error
 import xgboost as xgb
 try:
@@ -232,28 +234,83 @@ all_metrics = {}; all_preds = {}; all_signals = {}
 
 # ── sklearn models ─────────────────────────────────────────────────────────────
 print('\nFitting sklearn models with tuned params...')
-SK_CONFIGS = {
-    'Ridge':        Ridge(**TUNED['Ridge']),
-    'Lasso':        Lasso(**TUNED['Lasso']),
-    'SVR_lin':      LinearSVR(C=TUNED['SVR_lin']['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True),
-    'SVR_rbf':      SVR(kernel='rbf', C=TUNED['SVR_rbf']['C'],
-                        gamma=TUNED['SVR_rbf']['gamma'], epsilon=SVR_EPSILON),
-    'XGBoost':      xgb.XGBRegressor(**TUNED['XGBoost'], random_state=SEED, verbosity=0),
-    'RandomForest': RandomForestRegressor(**TUNED['RandomForest'], random_state=SEED),
-    'MLP':          MLPRegressor(**{k: tuple(v) if isinstance(v, list) else v
-                                    for k, v in TUNED['MLP'].items()},
-                                 max_iter=500, random_state=SEED),
-    'ElasticNet':   ElasticNet(**TUNED['ElasticNet'], max_iter=5000),
-}
-if LIGHTGBM_AVAILABLE:
-    SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**TUNED['LightGBM'], random_state=SEED, verbose=-1)
+
+def _pop_k(params):
+    """Extract selector__k (if present) and return (k_or_None, model_params)."""
+    p = dict(params)
+    k = p.pop('selector__k', None)
+    return k, p
+
+def _wrap_pipeline(base_model, k, n_total_features):
+    """Wrap base_model in a scaler+selector+model pipeline if k is set."""
+    if k is not None and k < n_total_features:
+        return Pipeline([
+            ('scaler',   StandardScaler()),
+            ('selector', SelectKBest(f_regression, k=k)),
+            ('model',    base_model),
+        ])
+    return Pipeline([
+        ('scaler', StandardScaler()),
+        ('model',  base_model),
+    ])
+
+n_feat = X_trainval.shape[1]
+
+def _build_sk_configs():
+    configs = {}
+
+    k, p = _pop_k(TUNED['Ridge'])
+    configs['Ridge'] = _wrap_pipeline(Ridge(**p), k, n_feat)
+
+    k, p = _pop_k(TUNED['Lasso'])
+    configs['Lasso'] = _wrap_pipeline(Lasso(**p), k, n_feat)
+
+    k, p = _pop_k(TUNED['SVR_lin'])
+    configs['SVR_lin'] = _wrap_pipeline(
+        LinearSVR(C=p['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True), k, n_feat)
+
+    k, p = _pop_k(TUNED['SVR_rbf'])
+    configs['SVR_rbf'] = _wrap_pipeline(
+        SVR(kernel='rbf', C=p['C'], gamma=p['gamma'], epsilon=SVR_EPSILON), k, n_feat)
+
+    k, p = _pop_k(TUNED['XGBoost'])
+    configs['XGBoost'] = _wrap_pipeline(
+        xgb.XGBRegressor(**p, random_state=SEED, verbosity=0), k, n_feat)
+
+    k, p = _pop_k(TUNED['RandomForest'])
+    configs['RandomForest'] = _wrap_pipeline(
+        RandomForestRegressor(**p, random_state=SEED), k, n_feat)
+
+    k, p = _pop_k(TUNED['MLP'])
+    mlp_p = {kk: tuple(v) if isinstance(v, list) else v for kk, v in p.items()}
+    configs['MLP'] = _wrap_pipeline(
+        MLPRegressor(**mlp_p, max_iter=500, random_state=SEED), k, n_feat)
+
+    k, p = _pop_k(TUNED['ElasticNet'])
+    configs['ElasticNet'] = _wrap_pipeline(ElasticNet(**p, max_iter=5000), k, n_feat)
+
+    if LIGHTGBM_AVAILABLE:
+        k, p = _pop_k(TUNED['LightGBM'])
+        configs['LightGBM'] = _wrap_pipeline(
+            lgb.LGBMRegressor(**p, random_state=SEED, verbose=-1), k, n_feat)
+
+    return configs
+
+SK_CONFIGS = _build_sk_configs()
+
 sk_fitted = {}
-for name, model in SK_CONFIGS.items():
-    model.fit(X_tv_s, y_trainval)
-    preds = model.predict(X_te_s)
+for name, pipe in SK_CONFIGS.items():
+    # Pipelines include their own scaler; feed raw scaled X to the full pipeline
+    # but the pipeline's first step is already a StandardScaler, so feed X_trainval raw.
+    # NOTE: X_tv_s is already scaled — to avoid double-scaling we refit on raw X.
+    # However update_results.py pre-scales to X_tv_s and X_te_s above.
+    # The pipeline has its own scaler, so pass unscaled data (X_trainval / X_test).
+    pipe.fit(X_trainval, y_trainval)
+    preds = pipe.predict(X_test)
     m = trading_metrics(preds, log_ret_test)
     all_metrics[name] = m; all_preds[name] = preds; all_signals[name] = m['signal']
-    sk_fitted[name] = model
+    # For SHAP we expose the fitted model object (last step of pipeline)
+    sk_fitted[name] = pipe
     print(f'  {name:<22} Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
           f'params={TUNED[name]}')
 
@@ -559,24 +616,46 @@ print(f'Saved → {RESULTS_DIR}/signal_timeline.png')
 # 9. SHAP SUMMARY — BEST MODEL  (shap_summary.png)
 # ══════════════════════════════════════════════════════════════════════════════
 print(f'Computing SHAP for best model ({best_name})...')
-best_model_obj = sk_fitted.get(best_name)
-X_te_shap = X_te_s
+best_pipe = sk_fitted.get(best_name)
 
 try:
+    # Unwrap pipeline: apply scaler + (optional) selector to get model-input data
+    # and extract the raw model object for SHAP explainers that need it
+    if best_pipe is not None and hasattr(best_pipe, 'named_steps'):
+        _steps = best_pipe.named_steps
+        _scaler = _steps.get('scaler')
+        _selector = _steps.get('selector')
+        _raw_model = _steps.get('model')
+
+        X_tv_shap = _scaler.transform(X_trainval) if _scaler else X_trainval
+        X_te_shap = _scaler.transform(X_test) if _scaler else X_test
+        if _selector is not None:
+            X_tv_shap = _selector.transform(X_tv_shap)
+            X_te_shap = _selector.transform(X_te_shap)
+            shap_feat_names = [FEATURE_COLS[i] for i in _selector.get_support(indices=True)]
+        else:
+            shap_feat_names = FEATURE_COLS
+        best_model_obj = _raw_model
+    else:
+        X_tv_shap = X_tv_s
+        X_te_shap = X_te_s
+        shap_feat_names = FEATURE_COLS
+        best_model_obj = best_pipe
+
     if best_name in ['XGBoost', 'RandomForest']:
         explainer = shap.TreeExplainer(best_model_obj)
         shap_vals = explainer.shap_values(X_te_shap)
     elif best_name in ['Ridge', 'Lasso', 'SVR_lin']:
-        masker    = shap.maskers.Independent(X_tv_s, max_samples=200)
+        masker    = shap.maskers.Independent(X_tv_shap, max_samples=200)
         explainer = shap.LinearExplainer(best_model_obj, masker)
         shap_vals = explainer.shap_values(X_te_shap)
     else:
-        masker    = shap.maskers.Independent(X_tv_s, max_samples=100)
+        masker    = shap.maskers.Independent(X_tv_shap, max_samples=100)
         explainer = shap.PermutationExplainer(best_model_obj.predict, masker)
         shap_vals = explainer(X_te_shap[:200]).values
 
     fig, ax = plt.subplots(figsize=(10, 7))
-    shap.summary_plot(shap_vals, X_te_shap, feature_names=FEATURE_COLS,
+    shap.summary_plot(shap_vals, X_te_shap, feature_names=shap_feat_names,
                       show=False, max_display=20)
     plt.title(f'SHAP Feature Importance — {best_name} (best model, Sharpe={all_metrics[best_name]["Sharpe"]:.2f})',
               fontsize=12)

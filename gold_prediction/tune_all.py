@@ -23,7 +23,7 @@ LOG_DIR    = '/tmp/tune_gold_logs'
 PYTHON     = sys.executable   # same venv that launched this script
 
 SKLEARN_MODELS = ['Ridge', 'Lasso', 'SVR_lin', 'SVR_rbf',
-                  'XGBoost', 'RandomForest', 'MLP']
+                  'XGBoost', 'RandomForest', 'MLP', 'ElasticNet', 'LightGBM']
 KERAS_MODELS   = ['LSTM', 'GRU', 'BiLSTM']
 ALL_MODELS     = SKLEARN_MODELS + KERAS_MODELS
 

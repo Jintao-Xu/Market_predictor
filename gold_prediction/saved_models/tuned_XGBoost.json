@@ -4,7 +4,8 @@
     "learning_rate": 0.05,
     "max_depth": 2,
     "n_estimators": 200,
-    "subsample": 0.8
+    "subsample": 0.8,
+    "selector__k": 57
   },
   "cv_mse": 0.00011923160621933361,
   "MSE": 0.0006970074252480243,

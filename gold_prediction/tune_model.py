@@ -27,6 +27,7 @@ from sklearn.svm import SVR, LinearSVR
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error
@@ -56,7 +57,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {},
         'grid': {
-            'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'alpha':       [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'selector__k': [15, 20, 30, 39, 57],
         },
     },
     'Lasso': {
@@ -64,7 +66,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {},
         'grid': {
-            'alpha': [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            'alpha':       [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            'selector__k': [15, 20, 30, 39, 57],
         },
     },
     'SVR_lin': {
@@ -72,7 +75,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'max_iter': 10000, 'dual': True},
         'grid': {
-            'C': [0.01, 0.1, 1, 10, 100, 1000],
+            'C':           [0.01, 0.1, 1, 10, 100, 1000],
+            'selector__k': [20, 30, 39, 57],
         },
     },
     'SVR_rbf': {
@@ -80,8 +84,9 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'kernel': 'rbf'},
         'grid': {
-            'C':     [0.01, 0.1, 1, 10, 100],
-            'gamma': ['scale', 0.001, 0.01, 0.1],
+            'C':           [0.01, 0.1, 1, 10, 100],
+            'gamma':       ['scale', 0.001, 0.01, 0.1],
+            'selector__k': [20, 30, 39, 57],
         },
     },
     'XGBoost': {
@@ -93,6 +98,7 @@ PARAM_CATALOGUE = {
             'max_depth':     [2, 3, 4, 5],
             'learning_rate': [0.01, 0.05, 0.1, 0.2],
             'subsample':     [0.8, 1.0],
+            'selector__k':   [30, 39, 57],
         },
     },
     'RandomForest': {
@@ -100,10 +106,11 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'random_state': SEED},
         'grid': {
-            'n_estimators':     [50, 100, 200, 300],
-            'max_depth':        [3, 5, 10, None],
+            'n_estimators':      [50, 100, 200, 300],
+            'max_depth':         [3, 5, 10, None],
             'min_samples_split': [2, 5, 10],
             'min_samples_leaf':  [1, 2, 4],
+            'selector__k':       [30, 39, 57],
         },
     },
     'MLP': {
@@ -112,8 +119,9 @@ PARAM_CATALOGUE = {
         'fixed': {'max_iter': 500, 'random_state': SEED},
         'grid': {
             'hidden_layer_sizes': [(32,), (64,), (128,), (64, 32), (128, 64), (128, 64, 32)],
-            'alpha':              [0.0001, 0.001, 0.01],
+            'alpha':              [0.001, 0.01, 0.1, 1.0],
             'learning_rate_init': [0.001, 0.01],
+            'selector__k':        [15, 20, 25, 30],
         },
     },
     'LSTM': {
@@ -158,6 +166,7 @@ PARAM_CATALOGUE = {
             'num_leaves':    [15, 31, 63],
             'learning_rate': [0.01, 0.05, 0.1],
             'subsample':     [0.8, 1.0],
+            'selector__k':   [30, 39, 57],
         },
     },
     'ElasticNet': {
@@ -165,8 +174,9 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'max_iter': 5000},
         'grid': {
-            'alpha':    [0.0001, 0.001, 0.01, 0.1],
-            'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],
+            'alpha':       [0.0001, 0.001, 0.01, 0.1],
+            'l1_ratio':    [0.1, 0.3, 0.5, 0.7, 0.9],
+            'selector__k': [15, 20, 30, 39],
         },
     },
 }
@@ -352,37 +362,43 @@ def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
 
     if model_name == 'Ridge':
         base = Ridge()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'Lasso':
         base = Lasso()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'SVR_lin':
         base = LinearSVR(epsilon=SVR_EPS, max_iter=10000, dual=True)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'SVR_rbf':
         base = SVR(kernel='rbf', epsilon=SVR_EPS)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'XGBoost':
         base = xgb.XGBRegressor(random_state=SEED, verbosity=0)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'RandomForest':
         base = RandomForestRegressor(random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'MLP':
         base = MLPRegressor(max_iter=500, random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'ElasticNet':
         base = ElasticNet(max_iter=5000)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     elif model_name == 'LightGBM':
         if not LIGHTGBM_AVAILABLE:
             raise ImportError('lightgbm not installed')
         base = lgb.LGBMRegressor(random_state=SEED, verbose=-1)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
     else:
         raise ValueError(f'Unknown sklearn model: {model_name}')
 
-    pipe = Pipeline([('scaler', StandardScaler()), ('model', base)])
+    # Build param grid: selector__k stays as-is; all other keys get model__ prefix
+    pg = {}
+    for k, v in grid.items():
+        if k == 'selector__k':
+            pg['selector__k'] = v
+        else:
+            pg[f'model__{k}'] = v
+
+    n_features = X_tv.shape[1]
+    # Default k = all features if selector__k not in grid
+    default_k = n_features
+    pipe = Pipeline([
+        ('scaler',   StandardScaler()),
+        ('selector', SelectKBest(f_regression, k=default_k)),
+        ('model',    base),
+    ])
     total = 1
     for v in grid.values():
         total *= len(v)
