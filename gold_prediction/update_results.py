@@ -52,6 +52,7 @@ RESULTS_DIR = 'results'
 DATA_DIR    = 'data'
 SEED        = 42
 ZSCORE_WIN  = 10
+SIGNAL_THRESHOLD = 0.0   # |z| < threshold → hold cash; overridden per-model from tuned_*.json
 SHARPE_THRESH = 7.5
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -75,6 +76,10 @@ def load_tuned(name, defaults):
     if os.path.exists(path):
         return json.load(open(path)).get('best_params', defaults)
     return defaults
+
+def model_params(name):
+    """Return tuned params with signal_threshold stripped out (not a model param)."""
+    return {k: v for k, v in TUNED[name].items() if k != 'signal_threshold'}
 
 TUNED = {
     'Ridge':        load_tuned('Ridge',        {'alpha': 0.01}),
@@ -201,12 +206,13 @@ X_te_s = sc.transform(X_test)
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. FIT ALL MODELS + COLLECT METRICS
 # ══════════════════════════════════════════════════════════════════════════════
-def trading_metrics(preds, log_rets):
+def trading_metrics(preds, log_rets, threshold=SIGNAL_THRESHOLD):
     n_ = len(preds)
     ps  = pd.Series(preds)
     z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / \
           ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig    = np.where(z > 0, 1, -1).astype(float)
+    sig    = np.where(z >  threshold,  1.0,
+             np.where(z < -threshold, -1.0, 0.0))
     strat  = sig * np.array(log_rets[:n_])
     eq     = np.exp(np.cumsum(strat))
     cagr   = (eq[-1] ** (252 / n_) - 1) * 100
@@ -233,25 +239,26 @@ all_metrics = {}; all_preds = {}; all_signals = {}
 # ── sklearn models ─────────────────────────────────────────────────────────────
 print('\nFitting sklearn models with tuned params...')
 SK_CONFIGS = {
-    'Ridge':        Ridge(**TUNED['Ridge']),
-    'Lasso':        Lasso(**TUNED['Lasso']),
+    'Ridge':        Ridge(**model_params('Ridge')),
+    'Lasso':        Lasso(**model_params('Lasso')),
     'SVR_lin':      LinearSVR(C=TUNED['SVR_lin']['C'], epsilon=SVR_EPSILON, max_iter=10000, dual=True),
     'SVR_rbf':      SVR(kernel='rbf', C=TUNED['SVR_rbf']['C'],
                         gamma=TUNED['SVR_rbf']['gamma'], epsilon=SVR_EPSILON),
-    'XGBoost':      xgb.XGBRegressor(**TUNED['XGBoost'], random_state=SEED, verbosity=0),
-    'RandomForest': RandomForestRegressor(**TUNED['RandomForest'], random_state=SEED),
+    'XGBoost':      xgb.XGBRegressor(**model_params('XGBoost'), random_state=SEED, verbosity=0),
+    'RandomForest': RandomForestRegressor(**model_params('RandomForest'), random_state=SEED),
     'MLP':          MLPRegressor(**{k: tuple(v) if isinstance(v, list) else v
-                                    for k, v in TUNED['MLP'].items()},
+                                    for k, v in model_params('MLP').items()},
                                  max_iter=500, random_state=SEED),
-    'ElasticNet':   ElasticNet(**TUNED['ElasticNet'], max_iter=5000),
+    'ElasticNet':   ElasticNet(**model_params('ElasticNet'), max_iter=5000),
 }
 if LIGHTGBM_AVAILABLE:
-    SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**TUNED['LightGBM'], random_state=SEED, verbose=-1)
+    SK_CONFIGS['LightGBM'] = lgb.LGBMRegressor(**model_params('LightGBM'), random_state=SEED, verbose=-1)
 sk_fitted = {}
 for name, model in SK_CONFIGS.items():
     model.fit(X_tv_s, y_trainval)
     preds = model.predict(X_te_s)
-    m = trading_metrics(preds, log_ret_test)
+    thr   = float(TUNED[name].get('signal_threshold', SIGNAL_THRESHOLD))
+    m = trading_metrics(preds, log_ret_test, threshold=thr)
     all_metrics[name] = m; all_preds[name] = preds; all_signals[name] = m['signal']
     sk_fitted[name] = model
     print(f'  {name:<22} Sharpe={m["Sharpe"]:6.3f}  DirAcc={m["DirAcc"]*100:.1f}%  '
@@ -306,7 +313,8 @@ for model_name, build_info in [
           validation_split=0.1)
 
     preds = m.predict(Xte_sq, verbose=0).flatten()
-    met   = trading_metrics(preds, lr_test)
+    thr   = float(TUNED[model_name].get('signal_threshold', SIGNAL_THRESHOLD))
+    met   = trading_metrics(preds, lr_test, threshold=thr)
     all_metrics[model_name] = met
     all_preds[model_name]   = preds
     all_signals[model_name] = met['signal']

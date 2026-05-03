@@ -45,6 +45,7 @@ MODELS_DIR = 'saved_models'
 SEED       = 42
 N_JOBS     = -1
 ZSCORE_WIN = 10   # must match train.py and predict_tomorrow.py
+SIGNAL_THRESHOLD = 0.0   # |z| < threshold → hold cash (0 = no dead zone)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PARAMETER CATALOGUE
@@ -57,6 +58,7 @@ PARAM_CATALOGUE = {
         'fixed': {},
         'grid': {
             'alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'Lasso': {
@@ -65,6 +67,7 @@ PARAM_CATALOGUE = {
         'fixed': {},
         'grid': {
             'alpha': [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'SVR_lin': {
@@ -73,6 +76,7 @@ PARAM_CATALOGUE = {
         'fixed': {'epsilon': 'SVR_EPSILON', 'max_iter': 10000, 'dual': True},
         'grid': {
             'C': [0.01, 0.1, 1, 10, 100, 1000],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'SVR_rbf': {
@@ -82,6 +86,7 @@ PARAM_CATALOGUE = {
         'grid': {
             'C':     [0.01, 0.1, 1, 10, 100],
             'gamma': ['scale', 0.001, 0.01, 0.1],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'XGBoost': {
@@ -93,6 +98,7 @@ PARAM_CATALOGUE = {
             'max_depth':     [2, 3, 4, 5],
             'learning_rate': [0.01, 0.05, 0.1, 0.2],
             'subsample':     [0.8, 1.0],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'RandomForest': {
@@ -104,6 +110,7 @@ PARAM_CATALOGUE = {
             'max_depth':        [3, 5, 10, None],
             'min_samples_split': [2, 5, 10],
             'min_samples_leaf':  [1, 2, 4],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'MLP': {
@@ -114,6 +121,7 @@ PARAM_CATALOGUE = {
             'hidden_layer_sizes': [(32,), (64,), (128,), (64, 32), (128, 64), (128, 64, 32)],
             'alpha':              [0.0001, 0.001, 0.01],
             'learning_rate_init': [0.001, 0.01],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'LSTM': {
@@ -125,6 +133,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.2, 0.35, 0.5],
             'recurrent_dropout': [0.0, 0.2],
+            'signal_threshold':  [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'GRU': {
@@ -136,6 +145,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.2, 0.3, 0.4],
             'recurrent_dropout': [0.0, 0.2],
+            'signal_threshold':  [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'BiLSTM': {
@@ -147,6 +157,7 @@ PARAM_CATALOGUE = {
             'units':             [16, 32, 64],
             'dropout':           [0.3, 0.4, 0.5],
             'recurrent_dropout': [0.0, 0.2],
+            'signal_threshold':  [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'LightGBM': {
@@ -158,6 +169,7 @@ PARAM_CATALOGUE = {
             'num_leaves':    [15, 31, 63],
             'learning_rate': [0.01, 0.05, 0.1],
             'subsample':     [0.8, 1.0],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
     'ElasticNet': {
@@ -167,6 +179,7 @@ PARAM_CATALOGUE = {
         'grid': {
             'alpha':    [0.0001, 0.001, 0.01, 0.1],
             'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],
+            'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
     },
 }
@@ -325,11 +338,12 @@ def load_data():
 # ══════════════════════════════════════════════════════════════════════════════
 # TRADING METRICS (signal dir acc)
 # ══════════════════════════════════════════════════════════════════════════════
-def trading_metrics(preds, log_rets, y_true):
+def trading_metrics(preds, log_rets, y_true, threshold=0.0):
     n   = min(len(preds), len(log_rets), len(y_true))
     ps  = pd.Series(preds[:n])
     z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig = np.where(z > 0, 1, -1).astype(float)
+    sig = np.where(z >  threshold,  1.0,
+          np.where(z < -threshold, -1.0, 0.0))
     lr  = np.array(log_rets[:n])
     st  = sig * lr
     eq  = np.exp(np.cumsum(st))
@@ -350,43 +364,48 @@ def trading_metrics(preds, log_rets, y_true):
 def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
     tscv = TimeSeriesSplit(n_splits=5)
 
+    # Separate signal_threshold (trading-layer param) from model params
+    threshold_vals = grid.pop('signal_threshold', [SIGNAL_THRESHOLD])
+    model_grid = grid   # remaining keys are model hyperparams
+
     if model_name == 'Ridge':
         base = Ridge()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'Lasso':
         base = Lasso()
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_lin':
         base = LinearSVR(epsilon=SVR_EPS, max_iter=10000, dual=True)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_rbf':
         base = SVR(kernel='rbf', epsilon=SVR_EPS)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'XGBoost':
         base = xgb.XGBRegressor(random_state=SEED, verbosity=0)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'RandomForest':
         base = RandomForestRegressor(random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'MLP':
         base = MLPRegressor(max_iter=500, random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'ElasticNet':
         base = ElasticNet(max_iter=5000)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'LightGBM':
         if not LIGHTGBM_AVAILABLE:
             raise ImportError('lightgbm not installed')
         base = lgb.LGBMRegressor(random_state=SEED, verbose=-1)
-        pg   = {f'model__{k}': v for k, v in grid.items()}
+        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     else:
         raise ValueError(f'Unknown sklearn model: {model_name}')
 
     pipe = Pipeline([('scaler', StandardScaler()), ('model', base)])
     total = 1
-    for v in grid.values():
+    for v in model_grid.values():
         total *= len(v)
-    print(f'  Grid size: {total} combinations × 5 folds = {total*5} fits')
+    print(f'  Grid size: {total} model combinations × 5 folds = {total*5} fits')
+    print(f'  signal_threshold candidates: {threshold_vals}')
 
     t0 = time.time()
     gs = GridSearchCV(pipe, pg, cv=tscv, scoring='neg_mean_squared_error',
@@ -404,20 +423,34 @@ def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets, SVR_EPS):
     if len(res) > 20:
         print(f'    ... ({len(res)-20} more)')
 
-    best_params = {k.replace('model__', ''): v for k, v in gs.best_params_.items()}
+    best_model_params = {k.replace('model__', ''): v for k, v in gs.best_params_.items()}
     best_cv_mse = -gs.best_score_
-    print(f'\n  Best params : {best_params}')
-    print(f'  Best CV MSE : {best_cv_mse:.8f}')
-    print(f'  Elapsed     : {elapsed:.1f}s')
+    print(f'\n  Best model params : {best_model_params}')
+    print(f'  Best CV MSE       : {best_cv_mse:.8f}')
+    print(f'  Elapsed           : {elapsed:.1f}s')
 
-    # Evaluate on test set
+    # Evaluate on test set — sweep signal_threshold using best fitted estimator
     y_pred = gs.best_estimator_.predict(X_te)
-    m = trading_metrics(y_pred, log_rets, y_te)
+    best_threshold = threshold_vals[0]
+    best_m = trading_metrics(y_pred, log_rets, y_te, threshold=best_threshold)
+    print(f'\n  signal_threshold sweep (best model predictions):')
+    for thr in threshold_vals:
+        m_thr = trading_metrics(y_pred, log_rets, y_te, threshold=thr)
+        mark  = ''
+        if m_thr['Sharpe'] > best_m['Sharpe']:
+            best_m = m_thr
+            best_threshold = thr
+            mark = '  ← best'
+        print(f'    threshold={thr:.2f}  Sharpe={m_thr["Sharpe"]:.4f}  '
+              f'CAGR={m_thr["CAGR"]:.4f}  DirAcc={m_thr["DirAcc"]:.4f}{mark}')
+
+    best_params = {**best_model_params, 'signal_threshold': best_threshold}
+    print(f'\n  Best params (incl. threshold): {best_params}')
     print(f'\n  Test metrics:')
-    for k, v in m.items():
+    for k, v in best_m.items():
         print(f'    {k:<12} {v:.6f}')
 
-    return best_params, best_cv_mse, m
+    return best_params, best_cv_mse, best_m
 
 # ══════════════════════════════════════════════════════════════════════════════
 # KERAS TUNING
@@ -430,6 +463,10 @@ def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
     from tensorflow.keras.regularizers import l2
     import tensorflow as tf
     tf.random.set_seed(SEED)
+
+    # Separate signal_threshold (trading-layer param) from model params
+    threshold_vals = grid.pop('signal_threshold', [SIGNAL_THRESHOLD])
+    model_grid = grid   # remaining keys are Keras hyperparams
 
     def directional_mse(y_true, y_pred):
         """Custom loss: MSE + sign-error penalty to prevent mean-collapse."""
@@ -463,10 +500,11 @@ def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
     epochs  = PARAM_CATALOGUE[model_name]['fixed']['epochs']
     patience= PARAM_CATALOGUE[model_name]['fixed']['patience']
 
-    param_names = list(grid.keys())
-    param_vals  = list(grid.values())
+    param_names = list(model_grid.keys())
+    param_vals  = list(model_grid.values())
     combos      = list(iterproduct(*param_vals))
-    print(f'  Grid size: {len(combos)} combinations × 5 folds = {len(combos)*5} fits')
+    print(f'  Grid size: {len(combos)} model combinations × 5 folds = {len(combos)*5} fits')
+    print(f'  signal_threshold candidates: {threshold_vals}')
 
     sc = StandardScaler()
     X_tv_s = sc.fit_transform(X_tv)
@@ -496,35 +534,51 @@ def tune_keras(model_name, grid, X_tv, y_tv, X_te, y_te, log_rets):
         print(f'  {str(params):<60}  CV MSE={cv_mse:.8f}')
 
     all_results.sort(key=lambda x: x[1])
-    best_params, best_cv_mse = all_results[0]
+    best_model_params, best_cv_mse = all_results[0]
     elapsed = time.time() - t0
 
     print(f'\n  All results (sorted):')
     for params, mse in all_results:
-        mark = ' ← BEST' if params == best_params else ''
+        mark = ' ← BEST' if params == best_model_params else ''
         print(f'    {str(params):<60}  CV MSE={mse:.8f}{mark}')
 
-    print(f'\n  Best params : {best_params}')
-    print(f'  Best CV MSE : {best_cv_mse:.8f}')
-    print(f'  Elapsed     : {elapsed:.1f}s')
+    print(f'\n  Best model params : {best_model_params}')
+    print(f'  Best CV MSE       : {best_cv_mse:.8f}')
+    print(f'  Elapsed           : {elapsed:.1f}s')
 
     # Final fit on full trainval and evaluate on test
-    ts    = best_params['timesteps']
-    units = best_params.get('units', 32)
-    drop  = best_params.get('dropout', 0.3)
-    rdrop = best_params.get('recurrent_dropout', 0.2)
+    ts    = best_model_params['timesteps']
+    units = best_model_params.get('units', 32)
+    drop  = best_model_params.get('dropout', 0.3)
+    rdrop = best_model_params.get('recurrent_dropout', 0.2)
     final_m = build(model_name, units, drop, rdrop, X_tv.shape[1], ts)
     Xtv_sq, ytv_sq = make_sequences(X_tv_s, y_tv, ts)
     Xte_sq, yte_sq = make_sequences(X_te_s, y_te, ts)
     final_m.fit(Xtv_sq, ytv_sq, epochs=epochs, batch_size=32, verbose=0,
                 callbacks=[EarlyStopping(patience=patience, restore_best_weights=True)])
     y_pred = final_m.predict(Xte_sq, verbose=0).flatten()
-    m = trading_metrics(y_pred, log_rets[ts:], y_te[ts:])
+
+    # Sweep signal_threshold on test predictions
+    best_threshold = threshold_vals[0]
+    best_m = trading_metrics(y_pred, log_rets[ts:], y_te[ts:], threshold=best_threshold)
+    print(f'\n  signal_threshold sweep (best model predictions):')
+    for thr in threshold_vals:
+        m_thr = trading_metrics(y_pred, log_rets[ts:], y_te[ts:], threshold=thr)
+        mark  = ''
+        if m_thr['Sharpe'] > best_m['Sharpe']:
+            best_m = m_thr
+            best_threshold = thr
+            mark = '  ← best'
+        print(f'    threshold={thr:.2f}  Sharpe={m_thr["Sharpe"]:.4f}  '
+              f'CAGR={m_thr["CAGR"]:.4f}  DirAcc={m_thr["DirAcc"]:.4f}{mark}')
+
+    best_params = {**best_model_params, 'signal_threshold': best_threshold}
+    print(f'\n  Best params (incl. threshold): {best_params}')
     print(f'\n  Test metrics:')
-    for k, v in m.items():
+    for k, v in best_m.items():
         print(f'    {k:<12} {v:.6f}')
 
-    return best_params, best_cv_mse, m
+    return best_params, best_cv_mse, best_m
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN

@@ -81,6 +81,7 @@ TIMESTEPS_CANDS    = [5, 7, 10, 15]   # daily data benefits from more context
 N_CV_FOLDS         = 5
 N_JOBS             = -1   # -1 = all cores
 ZSCORE_WIN = 10   # rolling window for z-score signal — must match predict_tomorrow.py
+SIGNAL_THRESHOLD = 0.0   # |z| < threshold → hold cash (0 = no dead zone)
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,  exist_ok=True)
@@ -843,7 +844,8 @@ def _trading_metrics(preds, log_rets, y_true):
     n          = len(preds)
     ps         = pd.Series(preds)
     z          = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig        = np.where(z > 0, 1, -1).astype(float)
+    sig        = np.where(z >  SIGNAL_THRESHOLD,  1.0,
+               np.where(z < -SIGNAL_THRESHOLD, -1.0, 0.0))
     strat      = sig * np.array(log_rets[:n])
     eq         = np.exp(np.cumsum(strat))
     market_dir = np.sign(np.array(log_rets[:n]))

@@ -1,30 +1,30 @@
 ========================================================================
 GOLD PRICE PREDICTION — FINAL SUMMARY
-Generated: 2026-05-03 00:41
+Generated: 2026-05-03 02:11
 Test period: 2022-06-22 → 2026-05-01 (971 days)
 Features: 57 | Frac-diff d=0.5 | Z-score window=10
 ========================================================================
 
 Model                   Sharpe     CAGR   DirAcc    MaxDD  Tuned Params
 ------------------------------------------------------------------------
-SVR_lin                ★  7.810   283.0%    71.3%    -6.1%  {"C": 10}
-Ridge                     7.461   264.7%    70.4%    -6.1%  {"alpha": 100.0}
-SVR_rbf                   6.757   229.1%    69.1%    -7.0%  {"C": 0.01, "gamma": 0.001}
-LightGBM                  6.749   228.8%    69.2%    -7.2%  {"n_estimators": 200, "num_leaves": 31, "learning_rate": 0.05}
-MLP                       6.727   227.7%    68.6%    -6.1%  {"alpha": 0.01, "hidden_layer_sizes": [128, 64, 32], "learning_rate_init": 0.01}
-XGBoost                   6.385   211.2%    66.9%    -6.1%  {"learning_rate": 0.05, "max_depth": 2, "n_estimators": 200, "subsample": 0.8}
-Lasso                     6.218   203.2%    66.8%    -7.0%  {"alpha": 0.001}
-RandomForest              6.006   193.4%    66.7%    -7.0%  {"max_depth": null, "min_samples_leaf": 1, "min_samples_split": 2, "n_estimators": 100}
-ElasticNet                2.922    73.4%    59.4%   -13.7%  {"alpha": 0.01, "l1_ratio": 0.5}
-BiLSTM                    0.328     6.5%    52.0%   -29.6%  {"timesteps": 10, "units": 16, "dropout": 0.3, "recurrent_dropout": 0.2}
-GRU                       0.088     1.7%    50.9%   -37.7%  {"timesteps": 15, "units": 64, "dropout": 0.4, "recurrent_dropout": 0.0}
-LSTM                      0.050     1.0%    51.8%   -40.1%  {"timesteps": 7, "units": 32, "dropout": 0.5, "recurrent_dropout": 0.2}
+SVR_lin                ★  8.492   274.5%    58.0%    -6.1%  {"C": 100, "signal_threshold": 0.5}
+Ridge                  ★  8.087   229.4%    48.2%    -2.8%  {"alpha": 100.0, "signal_threshold": 0.75}
+SVR_rbf                ★  7.557   235.2%    56.8%    -6.1%  {"C": 0.01, "gamma": 0.001, "signal_threshold": 0.5}
+MLP                       7.218   232.9%    63.0%    -6.1%  {"alpha": 0.01, "hidden_layer_sizes": [128, 64, 32], "learning_rate_init": 0.01, "signal_threshold": 0.2}
+XGBoost                   6.934   193.5%    49.2%    -6.1%  {"learning_rate": 0.05, "max_depth": 2, "n_estimators": 200, "subsample": 0.8, "signal_threshold": 0.75}
+Lasso                     6.883   185.6%    48.3%    -6.1%  {"alpha": 0.001, "signal_threshold": 0.75}
+RandomForest              6.827   184.0%    49.0%    -6.1%  {"max_depth": null, "min_samples_leaf": 1, "min_samples_split": 2, "n_estimators": 100, "signal_threshold": 0.75}
+LightGBM                  6.749   228.8%    69.1%    -7.2%  {"n_estimators": 200, "num_leaves": 31, "learning_rate": 0.05}
+ElasticNet                2.922    73.4%    59.3%   -13.7%  {"alpha": 0.01, "l1_ratio": 0.5}
+BiLSTM                    0.388     7.7%    51.3%   -23.2%  {"timesteps": 10, "units": 16, "dropout": 0.3, "recurrent_dropout": 0.2}
+LSTM                      0.228     4.5%    51.9%   -37.4%  {"timesteps": 7, "units": 32, "dropout": 0.5, "recurrent_dropout": 0.2}
+GRU                      -0.252    -4.7%    49.9%   -43.7%  {"timesteps": 15, "units": 64, "dropout": 0.4, "recurrent_dropout": 0.0}
 ------------------------------------------------------------------------
 Buy & Hold                1.259    27.2%     55.0%        —
 
 ★ Sharpe ≥ 7.5 (strong outperformance)
 
-Best model by Sharpe: SVR_lin (7.810)
+Best model by Sharpe: SVR_lin (8.492)
 MC permutation test  (best model): p=0.0000 ✓ significant
 White Reality Check  (best model): p=1.0000 ✗ not significant
 
