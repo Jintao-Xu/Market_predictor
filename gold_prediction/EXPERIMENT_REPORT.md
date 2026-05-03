@@ -401,14 +401,14 @@ Rationale: Exp 9 params were tuned on the full history with Sharpe-CV. For ensem
 | ElasticNet | 9.98 | 1286% | 81.6% | 89.5% | recent 3yr | Exp 10 |
 | SVR_rbf | 9.82 | 1072% | 89.6% | 63.2% | recent 3yr | Exp 10 |
 | XGBoost | 9.62 | 1098% | 80.9% | 72.4% | recent 3yr | Exp 10 |
-| LightGBM | 8.21 | — | 77.9% | 89.5% | full hist | Exp 9 |
-| RandomForest | 8.18 | — | 76.4% | 80.9% | full hist | Exp 9 |
-| **MLP** | **7.30** | — | **75.8%** | **84.2%** | full hist | Exp 9 |
-| LSTM | 0.37 | — | 55.3% | 100% | full hist | Exp 9 |
-| BiLSTM | 0.25 | — | 50.0% | 100% | full hist | Exp 9 |
-| GRU | −0.13 | — | 44.1% | 100% | full hist | Exp 9 |
+| LightGBM | 8.21 | 934% | 77.9% | 89.5% | full hist | Exp 9 |
+| RandomForest | 8.18 | 822% | 76.4% | 80.9% | full hist | Exp 9 |
+| **MLP** | **7.30** | **715%** | **75.8%** | **84.2%** | full hist | Exp 9 |
+| LSTM | 0.37 | 13% | 55.3% | 100% | full hist | Exp 9 |
+| BiLSTM | 0.25 | 8% | 50.0% | 100% | full hist | Exp 9 |
+| GRU | −0.13 | −4% | 44.1% | 100% | full hist | Exp 9 |
 
-*CAGR shown only for recent-3yr models (152-day test, 2025-09-24 → 2026-05-01). Full-hist models evaluated on the same period but z-score has 819-day warmup from their earlier test predictions — no cold-start bias.*
+*All models evaluated on the same 152-day window (2025-09-24 → 2026-05-01). Full-hist models have 819-day z-score warmup before eval start — no cold-start bias. High CAGR across the board reflects the 2025–2026 gold bull run.*
 
 **Finding:** The split is now principled: full-history models (LightGBM, RF, MLP, LSTM, GRU, BiLSTM) are trained on the complete dataset up to 2022-06-21. Their predictions from 2022-06-22 onwards provide 819 days of z-score warmup before the eval window — eliminating the cold-start bias in the preliminary run. LightGBM improves to 8.21, RandomForest to 8.18, MLP to 7.30 — all substantially better than their 3yr-only tuned versions (8.51, 7.33, 1.44 in Exp 10). The `tune_model.py` `--recent-years` flag (default 3, use 0 for full history) controls which window each model is tuned on. Deep learning (LSTM 0.37, BiLSTM 0.25, GRU −0.13) still underperforms on the 2025-2026 eval period, suggesting regime mismatch between full-history training distribution and recent gold dynamics.
 
