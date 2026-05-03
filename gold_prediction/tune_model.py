@@ -382,123 +382,118 @@ def trading_metrics(preds, log_rets, y_true, zscore_win=None, threshold=None):
     }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SKLEARN TUNING
+# SKLEARN TUNING  —  Sharpe-CV
+#
+# Replaces the old two-step approach (GridSearchCV by MSE, then OOF signal sweep)
+# with a single joint OOF sweep over (model_params × zscore_win × threshold),
+# all scored by OOF Sharpe. This eliminates the MSE/Sharpe misalignment that
+# caused Ridge alpha to be pushed too high in exp/extended-search.
+#
+# Fit count is identical to GridSearchCV (n_model_combos × n_folds); the signal
+# sweep is pure arithmetic on already-collected OOF predictions, not new fits.
 # ══════════════════════════════════════════════════════════════════════════════
 def tune_sklearn(model_name, grid, X_tv, y_tv, X_te, y_te, lr_tv, lr_te, SVR_EPS):
+    from sklearn.model_selection import ParameterGrid
+    from sklearn.base import clone
+
     tscv = TimeSeriesSplit(n_splits=5)
 
     # Separate signal-layer params from model hyperparameters
-    zscore_win_vals  = grid.pop('zscore_win',       [ZSCORE_WIN])
-    threshold_vals   = grid.pop('signal_threshold', [SIGNAL_THRESHOLD])
-    model_grid = grid  # remaining params are genuine model hyperparameters
+    zscore_win_vals = grid.pop('zscore_win',       [ZSCORE_WIN])
+    threshold_vals  = grid.pop('signal_threshold', [SIGNAL_THRESHOLD])
+    model_grid = grid
 
     if model_name == 'Ridge':
         base = Ridge()
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'Lasso':
         base = Lasso()
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_lin':
         base = LinearSVR(epsilon=SVR_EPS, max_iter=10000, dual=True)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'SVR_rbf':
         base = SVR(kernel='rbf', epsilon=SVR_EPS)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'XGBoost':
         base = xgb.XGBRegressor(random_state=SEED, verbosity=0)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'RandomForest':
         base = RandomForestRegressor(random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'MLP':
         base = MLPRegressor(max_iter=500, random_state=SEED)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'ElasticNet':
         base = ElasticNet(max_iter=5000)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     elif model_name == 'LightGBM':
         if not LIGHTGBM_AVAILABLE:
             raise ImportError('lightgbm not installed')
         base = lgb.LGBMRegressor(random_state=SEED, verbose=-1)
-        pg   = {f'model__{k}': v for k, v in model_grid.items()}
     else:
         raise ValueError(f'Unknown sklearn model: {model_name}')
 
-    pipe = Pipeline([('scaler', StandardScaler()), ('model', base)])
-    total_model = 1
-    for v in model_grid.values():
-        total_model *= len(v)
-    total_signal = len(zscore_win_vals) * len(threshold_vals)
-    print(f'  Model grid size: {total_model} combinations × 5 folds = {total_model*5} fits')
-    print(f'  Signal OOF grid: zscore_win={zscore_win_vals} × threshold={threshold_vals} = {total_signal} combos')
+    base_pipe        = Pipeline([('scaler', StandardScaler()), ('model', base)])
+    all_model_combos = list(ParameterGrid(model_grid))
+    n_signal_combos  = len(zscore_win_vals) * len(threshold_vals)
+    w = len(str(len(all_model_combos)))
+
+    print(f'  Sharpe-CV: {len(all_model_combos)} model combos × {tscv.n_splits} folds'
+          f' = {len(all_model_combos)*tscv.n_splits} fits')
+    print(f'  Signal sweep: {len(zscore_win_vals)} zscore_win × {len(threshold_vals)} threshold'
+          f' = {n_signal_combos} combos per model combo')
 
     t0 = time.time()
-    gs = GridSearchCV(pipe, pg, cv=tscv, scoring='neg_mean_squared_error',
-                      n_jobs=N_JOBS, refit=True, verbose=1)
-    gs.fit(X_tv, y_tv)
-    elapsed_gs = time.time() - t0
 
-    # Print full model grid results sorted by CV MSE
-    print(f'\n  All results (sorted by CV MSE):')
-    res = sorted(zip(gs.cv_results_['params'], gs.cv_results_['mean_test_score']),
-                 key=lambda x: -x[1])
-    for params, score in res[:20]:
-        clean = {k.replace('model__',''): v for k, v in params.items()}
-        print(f'    {str(clean):<60}  CV MSE={-score:.8f}')
-    if len(res) > 20:
-        print(f'    ... ({len(res)-20} more)')
-
-    best_model_params = {k.replace('model__', ''): v for k, v in gs.best_params_.items()}
-    best_cv_mse = -gs.best_score_
-    print(f'\n  Best model params : {best_model_params}')
-    print(f'  Best CV MSE       : {best_cv_mse:.8f}')
-    print(f'  GridSearchCV time : {elapsed_gs:.1f}s')
-
-    # ── OOF CV to jointly pick best (zscore_win, signal_threshold) ──────────────
-    # Collect OOF predictions from the best model via TimeSeriesSplit on trainval
-    print(f'\n  Tuning zscore_win + signal_threshold via joint OOF CV Sharpe...')
-    oof_preds    = np.full(len(y_tv), np.nan)
-    oof_log_rets = np.full(len(y_tv), np.nan)
-    best_pipe_clone = gs.best_estimator_
-    for tr_idx, va_idx in tscv.split(X_tv):
-        fold_pipe = Pipeline([
-            ('scaler', StandardScaler()),
-            ('model',  best_pipe_clone.named_steps['model'].__class__(
-                **{k: v for k, v in best_pipe_clone.named_steps['model'].get_params().items()}
-            ))
-        ])
-        fold_pipe.fit(X_tv[tr_idx], y_tv[tr_idx])
-        oof_preds[va_idx]    = fold_pipe.predict(X_tv[va_idx])
-        oof_log_rets[va_idx] = lr_tv[va_idx]
-
-    valid_mask     = ~np.isnan(oof_preds)
-    oof_preds_v    = oof_preds[valid_mask]
-    oof_log_rets_v = oof_log_rets[valid_mask]
-    oof_y_true_v   = y_tv[valid_mask]
-
-    best_signal_sharpe = -np.inf
+    best_global_sharpe = -np.inf
+    best_model_params  = all_model_combos[0]
     best_zscore_win    = zscore_win_vals[0]
     best_threshold     = threshold_vals[0]
-    for zw in zscore_win_vals:
-        for thr in threshold_vals:
-            m_oof = trading_metrics(oof_preds_v, oof_log_rets_v, oof_y_true_v,
-                                    zscore_win=zw, threshold=thr)
-            print(f'    zw={zw:>3}  thr={thr:.2f}  OOF Sharpe={m_oof["Sharpe"]:+.4f}')
-            if m_oof['Sharpe'] > best_signal_sharpe:
-                best_signal_sharpe = m_oof['Sharpe']
-                best_zscore_win    = zw
-                best_threshold     = thr
+    best_cv_mse        = np.inf
 
-    print(f'  Best: zscore_win={best_zscore_win}  threshold={best_threshold}'
-          f'  (OOF Sharpe={best_signal_sharpe:.4f})')
+    for i, params in enumerate(all_model_combos):
+        pipe_params = {f'model__{k}': v for k, v in params.items()}
+
+        oof_preds    = np.full(len(y_tv), np.nan)
+        oof_log_rets = np.full(len(y_tv), np.nan)
+        for tr_idx, va_idx in tscv.split(X_tv):
+            fold_pipe = clone(base_pipe)
+            fold_pipe.set_params(**pipe_params)
+            fold_pipe.fit(X_tv[tr_idx], y_tv[tr_idx])
+            oof_preds[va_idx]    = fold_pipe.predict(X_tv[va_idx])
+            oof_log_rets[va_idx] = lr_tv[va_idx]
+
+        valid    = ~np.isnan(oof_preds)
+        cv_mse   = float(np.mean((oof_preds[valid] - y_tv[valid]) ** 2))
+        best_combo_sharpe = -np.inf
+
+        for zw in zscore_win_vals:
+            for thr in threshold_vals:
+                m_oof = trading_metrics(oof_preds[valid], oof_log_rets[valid], y_tv[valid],
+                                        zscore_win=zw, threshold=thr)
+                s = m_oof['Sharpe']
+                if s > best_combo_sharpe:
+                    best_combo_sharpe = s
+                if s > best_global_sharpe:
+                    best_global_sharpe = s
+                    best_model_params  = params
+                    best_zscore_win    = zw
+                    best_threshold     = thr
+                    best_cv_mse        = cv_mse
+
+        print(f'  [{i+1:{w}}/{len(all_model_combos)}] {str(params):<55}'
+              f'  MSE={cv_mse:.6f}  best_Sharpe={best_combo_sharpe:+.4f}')
+
+    elapsed = time.time() - t0
+    print(f'\n  Best model params : {best_model_params}')
+    print(f'  Best signal params: zscore_win={best_zscore_win}  threshold={best_threshold}')
+    print(f'  Best OOF Sharpe   : {best_global_sharpe:.4f}')
+    print(f'  OOF MSE at best   : {best_cv_mse:.8f}')
+    print(f'  Sharpe-CV time    : {elapsed:.1f}s')
 
     best_params = {**best_model_params, 'zscore_win': best_zscore_win,
                    'signal_threshold': best_threshold}
-    elapsed = time.time() - t0
-    print(f'  Total elapsed   : {elapsed:.1f}s')
 
-    # Evaluate on test set using best model + best signal params
-    y_pred = gs.best_estimator_.predict(X_te)
+    # Refit on full trainval with best model params
+    final_pipe = clone(base_pipe)
+    final_pipe.set_params(**{f'model__{k}': v for k, v in best_model_params.items()})
+    final_pipe.fit(X_tv, y_tv)
+
+    # Evaluate on test set
+    y_pred = final_pipe.predict(X_te)
     m = trading_metrics(y_pred, lr_te, y_te, zscore_win=best_zscore_win, threshold=best_threshold)
     print(f'\n  Test metrics (zscore_win={best_zscore_win}, threshold={best_threshold}):')
     for k, v in m.items():
