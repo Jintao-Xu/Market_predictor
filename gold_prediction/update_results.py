@@ -54,6 +54,7 @@ SEED        = 42
 ZSCORE_WIN       = 10   # default fallback when no tuned zscore_win available
 SIGNAL_THRESHOLD = 0.0  # default fallback when no tuned signal_threshold available
 SHARPE_THRESH = 7.5
+RECENT_YEARS = 3   # restrict to last N years (must match train.py)
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -201,6 +202,11 @@ if HAS_COT:
     df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
 
 df.dropna(inplace=True)
+
+# Restrict to most recent N years (rolling features computed on full history above)
+_recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+df = df[df.index >= _recent_start].copy()
+print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
 
 FEATURE_COLS = [c for c in FEATURE_COLS if c in df.columns]
 X = df[FEATURE_COLS].values

@@ -81,6 +81,7 @@ TIMESTEPS_CANDS    = [5, 7, 10, 15]   # daily data benefits from more context
 N_CV_FOLDS         = 5
 N_JOBS             = -1   # -1 = all cores
 ZSCORE_WIN = 10   # rolling window for z-score signal — must match predict_tomorrow.py
+RECENT_YEARS       = 3    # restrict data to last N years after feature engineering
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,  exist_ok=True)
@@ -264,6 +265,13 @@ if HAS_COT:
     df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
 
 df.dropna(inplace=True)
+
+# Restrict to most recent N years (computed on full dataset for rolling warmup,
+# but only the recent window is used for training and testing)
+_recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+df = df[df.index >= _recent_start].copy()
+print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
+
 print(f'  Feature matrix: {df.shape[0]} rows × {df.shape[1]} cols')
 _elapsed('3. Feature engineering', t0)
 

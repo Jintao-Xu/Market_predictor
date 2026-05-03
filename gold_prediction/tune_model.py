@@ -46,6 +46,7 @@ SEED       = 42
 N_JOBS     = -1
 ZSCORE_WIN       = 10   # default fallback; tunable via OOF CV
 SIGNAL_THRESHOLD = 0.0  # default fallback; tunable via OOF CV
+RECENT_YEARS     = 3    # restrict to last N years (must match train.py)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PARAMETER CATALOGUE
@@ -331,7 +332,16 @@ def load_data():
 
     df.dropna(inplace=True)
 
+    # Restrict to most recent N years (rolling features computed on full history above)
+    _recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+    df = df[df.index >= _recent_start].copy()
+
     feat_cols  = [c for c in FEATURE_COLS if c in df.columns]
+    # Re-derive train_end from 80/20 split of the restricted window
+    _n   = len(df)
+    _spl = int(_n * 0.80)
+    TRAIN_END_DATE = df.index[_spl - 1]
+
     train_mask = df.index <= TRAIN_END_DATE
     test_mask  = ~train_mask
 
