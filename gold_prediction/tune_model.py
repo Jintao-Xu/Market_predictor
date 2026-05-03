@@ -57,7 +57,7 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {},
         'grid': {
-            'alpha':            [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0],
+            'alpha':            [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 500.0, 1000.0],
             'zscore_win':       [5, 7, 10, 15, 20],
             'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
@@ -77,7 +77,7 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'max_iter': 10000, 'dual': True},
         'grid': {
-            'C':                [0.01, 0.1, 1, 10, 100, 1000],
+            'C':                [0.01, 0.1, 1, 10, 100, 1000, 5000, 10000],
             'zscore_win':       [5, 7, 10, 15, 20],
             'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
@@ -87,8 +87,8 @@ PARAM_CATALOGUE = {
         'type': 'sklearn_pipeline',
         'fixed': {'epsilon': 'SVR_EPSILON', 'kernel': 'rbf'},
         'grid': {
-            'C':                [0.01, 0.1, 1, 10, 100],
-            'gamma':            ['scale', 0.001, 0.01, 0.1],
+            'C':                [0.001, 0.01, 0.1, 1, 10, 100],
+            'gamma':            [0.0001, 0.001, 0.01, 0.1, 'scale'],
             'zscore_win':       [5, 7, 10, 15, 20],
             'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
         },
@@ -124,7 +124,7 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'max_iter': 500, 'random_state': SEED},
         'grid': {
-            'hidden_layer_sizes': [(32,), (64,), (128,), (64, 32), (128, 64), (128, 64, 32)],
+            'hidden_layer_sizes': [(32,), (64,), (128,), (64, 32), (128, 64), (128, 64, 32), (256, 128, 64)],
             'alpha':              [0.0001, 0.001, 0.01],
             'learning_rate_init': [0.001, 0.01],
             'zscore_win':         [5, 7, 10, 15, 20],
@@ -175,9 +175,9 @@ PARAM_CATALOGUE = {
         'type': 'sklearn',
         'fixed': {'random_state': SEED, 'verbose': -1},
         'grid': {
-            'n_estimators':     [100, 200, 300],
-            'num_leaves':       [15, 31, 63],
-            'learning_rate':    [0.01, 0.05, 0.1],
+            'n_estimators':     [100, 200, 300, 500],
+            'num_leaves':       [7, 15, 31, 63],
+            'learning_rate':    [0.005, 0.01, 0.05, 0.1],
             'subsample':        [0.8, 1.0],
             'zscore_win':       [5, 7, 10, 15, 20],
             'signal_threshold': [0.0, 0.2, 0.3, 0.5, 0.75],
