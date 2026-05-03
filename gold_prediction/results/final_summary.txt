@@ -1,8 +1,8 @@
 ========================================================================
 GOLD PRICE PREDICTION — FINAL SUMMARY
-Generated: 2026-05-03 15:58
+Generated: 2026-05-03 16:49
 Test period: 2025-09-24 → 2026-05-01 (152 days)
-Features: 57 | Frac-diff d=0.3 | Z-score wins: {'Ridge': 5, 'Lasso': 5, 'SVR_lin': 5, 'SVR_rbf': 5, 'XGBoost': 5, 'RandomForest': 5, 'MLP': 5, 'LSTM': 15, 'GRU': 15, 'BiLSTM': 15, 'ElasticNet': 5, 'LightGBM': 5} | Thresholds: {'Ridge': 0.3, 'Lasso': 0.3, 'SVR_lin': 0.5, 'SVR_rbf': 0.75, 'XGBoost': 0.5, 'RandomForest': 0.5, 'MLP': 0.2, 'LSTM': 0.0, 'GRU': 0.2, 'BiLSTM': 0.3, 'ElasticNet': 0.3, 'LightGBM': 0.5}
+Features: 57 | Frac-diff d=0.3 | Z-score wins: {'Ridge': 5, 'Lasso': 5, 'SVR_lin': 5, 'SVR_rbf': 5, 'XGBoost': 5, 'RandomForest': 5, 'MLP': 5, 'LSTM': 10, 'GRU': 10, 'BiLSTM': 10, 'ElasticNet': 5, 'LightGBM': 5} | Thresholds: {'Ridge': 0.3, 'Lasso': 0.3, 'SVR_lin': 0.5, 'SVR_rbf': 0.75, 'XGBoost': 0.5, 'RandomForest': 0.5, 'MLP': 0.5, 'LSTM': 0.0, 'GRU': 0.0, 'BiLSTM': 0.0, 'ElasticNet': 0.3, 'LightGBM': 0.3}
 ========================================================================
 
 Model                   Sharpe     CAGR   DirAcc  Coverage    MaxDD  Tuned Params
@@ -13,12 +13,12 @@ Lasso                  ★  9.978  1286.0%    81.6%     89.5%    -3.8%  {"alpha"
 ElasticNet             ★  9.978  1286.0%    81.6%     89.5%    -3.8%  {"alpha": 0.0001, "l1_ratio": 0.1, "zscore_win": 5, "signal_threshold": 0.3}
 SVR_rbf                ★  9.822  1071.9%    89.6%     63.2%    -2.0%  {"C": 10, "gamma": 0.0001, "zscore_win": 5, "signal_threshold": 0.75}
 XGBoost                ★  9.617  1098.2%    80.9%     72.4%    -2.0%  {"learning_rate": 0.05, "max_depth": 4, "n_estimators": 300, "subsample": 0.8, "zscore_win": 5, "signal_threshold": 0.5}
-LightGBM               ★  8.514   821.2%    81.1%     73.0%    -3.8%  {"learning_rate": 0.05, "n_estimators": 100, "num_leaves": 7, "subsample": 0.8, "zscore_win": 5, "signal_threshold": 0.5}
-RandomForest              7.326   607.2%    78.2%     72.4%    -8.5%  {"max_depth": null, "min_samples_leaf": 1, "min_samples_split": 2, "n_estimators": 100, "zscore_win": 5, "signal_threshold": 0.5}
-MLP                       1.436    55.0%    59.6%     89.5%   -28.8%  {"alpha": 0.001, "hidden_layer_sizes": [128, 64], "learning_rate_init": 0.01, "zscore_win": 5, "signal_threshold": 0.2}
-GRU                      -0.463   -13.6%    51.6%     87.1%   -17.2%  {"timesteps": 5, "units": 64, "dropout": 0.4, "recurrent_dropout": 0.2, "zscore_win": 15, "signal_threshold": 0.2}
-LSTM                     -0.748   -21.7%    48.6%     99.3%   -20.3%  {"timesteps": 5, "units": 64, "dropout": 0.5, "recurrent_dropout": 0.2, "zscore_win": 15, "signal_threshold": 0.0}
-BiLSTM                   -1.034   -28.3%    46.7%     89.1%   -29.1%  {"timesteps": 15, "units": 16, "dropout": 0.5, "recurrent_dropout": 0.0, "zscore_win": 15, "signal_threshold": 0.3}
+LightGBM               ★  9.083  1023.1%    78.2%     87.5%    -3.8%  {"learning_rate": 0.1, "n_estimators": 500, "num_leaves": 15, "subsample": 0.8, "zscore_win": 5, "signal_threshold": 0.3}
+RandomForest              7.260   608.9%    77.6%     76.3%    -8.5%  {"max_depth": null, "min_samples_leaf": 1, "min_samples_split": 2, "n_estimators": 300, "zscore_win": 5, "signal_threshold": 0.5}
+MLP                       3.480   165.4%    63.1%     80.3%   -11.2%  {"alpha": 0.01, "hidden_layer_sizes": [256, 128, 64], "learning_rate_init": 0.01, "zscore_win": 5, "signal_threshold": 0.5}
+GRU                       0.742    28.0%    51.5%     99.3%   -17.6%  {"timesteps": 15, "units": 64, "dropout": 0.4, "recurrent_dropout": 0.0}
+BiLSTM                   -0.400   -12.4%    53.9%     99.3%   -20.4%  {"timesteps": 10, "units": 16, "dropout": 0.3, "recurrent_dropout": 0.2}
+LSTM                     -0.529   -16.0%    46.5%     99.3%   -23.6%  {"timesteps": 7, "units": 32, "dropout": 0.5, "recurrent_dropout": 0.2}
 ------------------------------------------------------------------------------
 Buy & Hold                1.043    40.1%     55.0%   100.0%        —
 
