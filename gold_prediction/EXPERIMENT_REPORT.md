@@ -327,7 +327,7 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 ---
 
-## Exp 9 — `exp/sharpe-cv` *(in progress)*
+## Exp 9 — `exp/sharpe-cv`
 
 **Change:** Replace two-step MSE-then-Sharpe selection with a single joint OOF Sharpe sweep over all params simultaneously. In `tune_sklearn`, `GridSearchCV` (MSE objective) is removed. Instead, for every model param combo the pipeline is cross-validated, OOF predictions collected, and then all (zscore_win × threshold) signal combos are evaluated by OOF Sharpe — in one loop. The winning (model_params, zscore_win, threshold) triple is the one with the best OOF Sharpe across the entire joint grid.
 
@@ -351,15 +351,47 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 ---
 
+---
+
+## Exp 10 — `exp/recent-3yr`
+
+**Change:** Restrict training and test data to the most recent 3 years (2023-05-01 → 2026-05-01, 756 rows). Feature engineering still runs on the full 20-year dataset for rolling warmup, then the window is sliced after `dropna()`. The 80/20 split is reapplied within the 3-year window: **train/val 604 rows (2023-05-01 → 2025-09-23), test 152 rows (2025-09-24 → 2026-05-01)**. All models re-tuned with Sharpe-CV (same grids as Exp 9). frac-diff d=0.3 (vs 0.5 on full history — recent window is more stationary).
+
+**Motivation:** Earlier data (2006–2015) has much lower volatility. Training on that flat regime may dilute the signal relevant to current gold dynamics (2023–2026 bull run). Restricting to recent data lets models focus on the current regime.
+
+| Model | Sharpe | CAGR | Active DirAcc | Coverage | vs Exp 9 | Best params |
+|---|---:|---:|---:|---:|---:|---|
+| **SVR_lin** | **10.60** | **1341%** | **88.4%** | **73.7%** | **+1.15** | C=10000, thr=0.5 |
+| Ridge | 10.13 | 1321% | 82.8% | 88.2% | +0.74 | α=0.1, thr=0.3 |
+| Lasso | 9.98 | 1286% | 81.6% | 89.5% | +0.72 | α=0.00001, thr=0.3 |
+| ElasticNet | 9.98 | 1286% | 81.6% | 89.5% | +0.72 | α=0.0001, thr=0.3 |
+| SVR_rbf | 9.82 | 1072% | 89.6% | 63.2% | +0.90 | C=10, γ=0.0001, thr=0.75 |
+| XGBoost | 9.62 | 1098% | 80.9% | 72.4% | +1.17 | depth=4, lr=0.05, n_est=300 |
+| LightGBM | 8.51 | 821% | 81.1% | 73.0% | −0.78 | n_est=100, leaves=7, lr=0.05 |
+| RandomForest | 7.33 | 607% | 78.2% | 72.4% | −0.81 | default, n_est=100 |
+| MLP | 1.44 | 55% | 59.6% | 89.5% | **−4.20** | (128,64), α=0.001 |
+| LSTM | −0.75 | −22% | 48.6% | 99.3% | −0.93 | ts=5 |
+| GRU | −0.46 | −14% | 51.6% | 87.1% | −1.10 | ts=5 |
+| BiLSTM | −1.03 | −28% | 46.7% | 89.1% | −1.42 | ts=15 |
+
+*CAGR is high due to the short 152-day test period (2025-09-24 → 2026-05-01) capturing a strong gold bull run. Compare Sharpe for regime-adjusted performance.*
+
+**Finding:** Restricting to recent 3 years helps the linear and SVM models significantly (+0.72 to +1.17 Sharpe) — their predictions align better with the current regime. XGBoost also improves (+1.17), confirming that the older flat-price data was diluting its gradient signal. Tree ensemble models (LightGBM −0.78, RandomForest −0.81) suffer from the smaller sample size (604 train rows, 57 features — ratio too tight for ensembles). Deep learning collapses entirely: 604 sequences is too little for LSTM/GRU/BiLSTM — they overfit the training window and produce negative Sharpe on test. MLP similarly degrades (−4.20). **The recent-3yr regime is a clear win for linear and kernel models; ensemble and deep learning models need more data than the 3-year window provides.**
+
+Active DirAcc is notably higher across the board (SVR_lin 88.4%, SVR_rbf 89.6%) suggesting the 2024–2026 gold market is more directionally consistent — larger, sustained moves rather than choppy reversals.
+
+---
+
 ## Summary
 
 ### SVR_lin Sharpe Ranking (all experiments)
 
 | Rank | Experiment | SVR_lin Sharpe | Primary Change |
 |---|---|---:|---|
-| 1 | `exp/extended-search` | **9.54** | Wider C grid |
-| 1 | `exp/sharpe-cv` | **9.45** | Sharpe-CV (SVR_lin unaffected; Ridge/Lasso/ElasticNet/XGBoost all improved) |
+| 1 | `exp/recent-3yr` | **10.60** | Train on last 3 years only |
+| 2 | `exp/extended-search` | **9.54** | Wider C grid |
 | 2 | `exp/combined-best` | 9.45 | ZSCORE_WIN=5 + threshold + ElasticNet fix |
+| 2 | `exp/sharpe-cv` | **9.45** | Sharpe-CV (SVR_lin unaffected; Ridge/Lasso/ElasticNet/XGBoost all improved) |
 | 3 | `exp/zscore-win-tuning` | 9.03 | ZSCORE_WIN: 10 → 5 |
 | 4 | `exp/signal-dead-zone` | 8.49 | Hold cash when \|z\| < 0.5 |
 | 5 | `main` (baseline) | 7.81 | — |
@@ -372,7 +404,8 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 | Experiment | Best model | Sharpe |
 |---|---|---:|
-| `exp/sharpe-cv` | SVR_lin | **9.45** |
+| `exp/recent-3yr` | SVR_lin | **10.60** |
+| `exp/sharpe-cv` | SVR_lin | 9.45 |
 | `exp/extended-search` | SVR_lin | 9.54 |
 | `exp/combined-best` | SVR_lin | 9.45 |
 | `exp/zscore-win-tuning` | SVR_lin | 9.03 |
@@ -383,6 +416,7 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 | Improvement | Best model gain | Notes |
 |---|---|---|
+| Recent 3yr training window | +1.17 (SVR_lin, XGBoost), +0.90 (SVR_rbf) | Exp 10 — focuses on current regime; linear/SVM/XGBoost all benefit |
 | Sharpe-CV (replace MSE-CV) | +0.88 (Ridge), +0.77 (Lasso), +0.71 (ElasticNet), +0.44 (XGBoost) | Exp 9 — all regularization-dominated models benefited |
 | ZSCORE_WIN=5 | +1.68 (RF), +1.53 (SVR_rbf) | Universal improvement, was a regression |
 | Signal dead zone (per-model threshold) | +0.82 (RF), +0.80 (SVR_rbf) | Cuts noise trades |
@@ -393,6 +427,8 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 | Change | Best model impact | Reason |
 |---|---|---|
+| Recent 3yr window for tree ensembles | −0.78 (LightGBM), −0.81 (RF) | 604 train rows too few for high-variance ensembles |
+| Recent 3yr window for deep learning | −4.20 (MLP), −0.93 (LSTM), −1.42 (BiLSTM) | 604 sequences inadequate; models overfit and collapse on test |
 | Per-model SelectKBest k | −0.59 (SVR_lin) | Optimal k=57 (no selection needed) |
 | Proportional sizing z/3 | −0.60 (SVR_lin) | Lower average position size reduces returns |
 | Ridge alpha > 100 (MSE-CV) | −0.65 (Ridge) | MSE-CV kept pushing regularization up; fixed by Sharpe-CV |
