@@ -789,7 +789,7 @@ tdates   = dates_test[:n_pred]
 
 ps          = pd.Series(pred)
 pred_z      = (ps - ps.rolling(5, min_periods=1).mean()) / ps.rolling(5, min_periods=1).std().fillna(1e-8)
-signal      = np.where(pred_z > 0, 1, -1).astype(float)
+signal      = np.clip(pred_z.values / 3.0, -1.0, 1.0)
 strat_ret   = signal * log_ret
 equity_strat = np.exp(np.cumsum(strat_ret))
 equity_bnh   = np.exp(np.cumsum(log_ret))
@@ -843,11 +843,11 @@ def _trading_metrics(preds, log_rets, y_true):
     n          = len(preds)
     ps         = pd.Series(preds)
     z          = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig        = np.where(z > 0, 1, -1).astype(float)
+    sig        = np.clip(z.values / 3.0, -1.0, 1.0)
     strat      = sig * np.array(log_rets[:n])
     eq         = np.exp(np.cumsum(strat))
     market_dir = np.sign(np.array(log_rets[:n]))
-    dir_acc    = float(np.mean(sig == market_dir))   # signal vs actual market direction
+    dir_acc    = float(np.mean(np.sign(sig) == market_dir))   # signal direction vs actual market direction
     return dict(
         MSE    = mean_squared_error(y_true[:n], preds),
         CAGR   = float(eq[-1] ** (252/n) - 1),

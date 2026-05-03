@@ -206,7 +206,7 @@ def trading_metrics(preds, log_rets):
     ps  = pd.Series(preds)
     z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / \
           ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig    = np.where(z > 0, 1, -1).astype(float)
+    sig    = np.clip(z.values / 3.0, -1.0, 1.0)
     strat  = sig * np.array(log_rets[:n_])
     eq     = np.exp(np.cumsum(strat))
     cagr   = (eq[-1] ** (252 / n_) - 1) * 100
@@ -217,7 +217,7 @@ def trading_metrics(preds, log_rets):
     roll_max = np.maximum.accumulate(eq)
     max_dd = float(np.min((eq - roll_max) / (roll_max + 1e-12)))
     mkt_dir = np.sign(np.array(log_rets[:n_]))
-    dir_acc = float(np.mean(sig == mkt_dir))
+    dir_acc = float(np.mean(np.sign(sig) == mkt_dir))
     mse     = mean_squared_error(y_test[:n_], preds)
     return dict(Sharpe=sharpe, CAGR=cagr, PF=pf, MaxDD=max_dd,
                 DirAcc=dir_acc, MSE=mse, equity=eq, signal=sig, preds=np.array(preds))
@@ -623,7 +623,12 @@ ax1.axvline(obs_sharpe, color='red', lw=2, label=f'Observed Sharpe={obs_sharpe:.
 ax1.set_title(f'MC Permutation Test  (p={mc_pval:.4f})\n{best_name}', fontsize=11)
 ax1.set_xlabel('Sharpe (random signal)'); ax1.legend()
 
-ax2.hist(null_wrc, bins=40, color='coral', alpha=0.75, edgecolor='white')
+if np.std(null_wrc) > 1e-12:
+    ax2.hist(null_wrc, bins=min(40, max(1, int(np.sqrt(len(null_wrc))))),
+             color='coral', alpha=0.75, edgecolor='white')
+else:
+    ax2.text(0.5, 0.5, f'Null distribution has zero variance\n(obs={obs_wrc:.5f})',
+             ha='center', va='center', transform=ax2.transAxes, fontsize=10)
 ax2.axvline(obs_wrc, color='darkred', lw=2, label=f'Observed mean ret={obs_wrc:.5f}')
 ax2.set_title(f'White Reality Check  (p={wrc_pval:.4f})\n{best_name}', fontsize=11)
 ax2.set_xlabel('Mean daily return (bootstrap)'); ax2.legend()

@@ -329,7 +329,7 @@ def trading_metrics(preds, log_rets, y_true):
     n   = min(len(preds), len(log_rets), len(y_true))
     ps  = pd.Series(preds[:n])
     z   = (ps - ps.rolling(ZSCORE_WIN, min_periods=1).mean()) / ps.rolling(ZSCORE_WIN, min_periods=1).std().fillna(1e-8)
-    sig = np.where(z > 0, 1, -1).astype(float)
+    sig = np.clip(z.values / 3.0, -1.0, 1.0)
     lr  = np.array(log_rets[:n])
     st  = sig * lr
     eq  = np.exp(np.cumsum(st))
@@ -340,7 +340,7 @@ def trading_metrics(preds, log_rets, y_true):
         'Sharpe': float(np.mean(st) / (np.std(st) + 1e-12) * np.sqrt(252)),
         'PF':     float(st[st>0].sum() / abs(st[st<0].sum())) if st[st<0].sum() != 0 else np.inf,
         'MaxDD':  float(((eq - np.maximum.accumulate(eq)) / np.maximum.accumulate(eq)).min()),
-        'DirAcc': float(np.mean(sig == mkt)),
+        'DirAcc': float(np.mean(np.sign(sig) == mkt)),
         'PredStd': float(np.std(preds[:n])),
     }
 

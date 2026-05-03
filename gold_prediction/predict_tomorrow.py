@@ -198,7 +198,8 @@ def zscore_signal(preds_series):
     z_val = z.iloc[-1]
     if np.isnan(z_val):
         z_val = 0.0
-    return float(z_val), int(1 if z_val >= 0 else -1)
+    sig = float(np.clip(z.iloc[-1] / 3.0, -1.0, 1.0))
+    return float(z_val), sig
 
 # Scale training data + recent window for prediction
 X_train_s = scaler.transform(X_train)
@@ -310,7 +311,7 @@ for name in model_order:
     sig  = signals[name]
     action = 'LONG  +' if sig > 0 else 'SHORT -'
     star   = ' ★' if sharpes.get(name, 0) >= 7.5 else ''
-    print(f'  {name:<16} {pred:>+12.6f}  {sig:>+8d}  {action}{star}')
+    print(f'  {name:<16} {pred:>+12.6f}  {sig:>+8.3f}  {action}{star}')
 
 print(f'{DIVIDER}')
 print(f'  Majority vote ({n_long}L / {n_short}S):     {majority}')
@@ -346,6 +347,6 @@ if 'TNX_yield' in df.columns:
     print(f'  10Y yield:        {tnx:.2f}%  real_yield_proxy={rp:.2f}')
 
 print()
-print(f'  Note: ★ = Sharpe ≥ 7.5 in backtest. Signal is directional only.')
+print(f'  Note: ★ = Sharpe ≥ 7.5 in backtest. Signal = clip(z/3, -1, 1).')
 print(f'        No position sizing, no transaction costs included.')
 print(f'{"═"*62}')
