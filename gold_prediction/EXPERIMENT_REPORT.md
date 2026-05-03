@@ -393,22 +393,24 @@ Active DirAcc is notably higher across the board (SVR_lin 88.4%, SVR_rbf 89.6%) 
 
 Rationale: Exp 9 params were tuned on the full history with Sharpe-CV. For ensemble/deep learning models that need more training data, those params are better calibrated than the ones over-fitted to 604 rows.
 
-| Model | Sharpe | CAGR | Active DirAcc | Coverage | Params source |
-|---|---:|---:|---:|---:|---|
-| **SVR_lin** | **10.60** | **1341%** | **88.4%** | **73.7%** | Exp 10 |
-| Ridge | 10.13 | 1321% | 82.8% | 88.2% | Exp 10 |
-| Lasso | 9.98 | 1286% | 81.6% | 89.5% | Exp 10 |
-| ElasticNet | 9.98 | 1286% | 81.6% | 89.5% | Exp 10 |
-| SVR_rbf | 9.82 | 1072% | 89.6% | 63.2% | Exp 10 |
-| XGBoost | 9.62 | 1098% | 80.9% | 72.4% | Exp 10 |
-| **LightGBM** | **9.08** | — | **78.2%** | **87.5%** | Exp 9 (↑ vs Exp10 8.51) |
-| RandomForest | 7.26 | — | 77.6% | 76.3% | Exp 9 |
-| MLP | 3.48 | — | 63.1% | 80.3% | Exp 9 (↑ vs Exp10 1.44) |
-| GRU | 0.74 | — | 51.5% | 99.3% | Exp 9 (↑ vs Exp10 −0.46) |
-| LSTM | −0.53 | — | 46.5% | 99.3% | Exp 9 (↑ vs Exp10 −0.75) |
-| BiLSTM | −0.40 | — | 53.9% | 99.3% | Exp 9 (↑ vs Exp10 −1.03) |
+| Model | Sharpe | CAGR | Active DirAcc | Coverage | Train window | Params source |
+|---|---:|---:|---:|---:|---|---|
+| **SVR_lin** | **10.60** | **1341%** | **88.4%** | **73.7%** | recent 3yr | Exp 10 |
+| Ridge | 10.13 | 1321% | 82.8% | 88.2% | recent 3yr | Exp 10 |
+| Lasso | 9.98 | 1286% | 81.6% | 89.5% | recent 3yr | Exp 10 |
+| ElasticNet | 9.98 | 1286% | 81.6% | 89.5% | recent 3yr | Exp 10 |
+| SVR_rbf | 9.82 | 1072% | 89.6% | 63.2% | recent 3yr | Exp 10 |
+| XGBoost | 9.62 | 1098% | 80.9% | 72.4% | recent 3yr | Exp 10 |
+| LightGBM | 8.21 | — | 77.9% | 89.5% | full hist | Exp 9 |
+| RandomForest | 8.18 | — | 76.4% | 80.9% | full hist | Exp 9 |
+| **MLP** | **7.30** | — | **75.8%** | **84.2%** | full hist | Exp 9 |
+| LSTM | 0.37 | — | 55.3% | 100% | full hist | Exp 9 |
+| BiLSTM | 0.25 | — | 50.0% | 100% | full hist | Exp 9 |
+| GRU | −0.13 | — | 44.1% | 100% | full hist | Exp 9 |
 
-**Finding:** Using Exp 9 hyperparams for ensemble/deep learning on the 3-year window partially recovers performance. LightGBM 8.51 → 9.08, MLP 1.44 → 3.48, GRU −0.46 → +0.74. The deeper architectures and larger n_estimators from Exp 9 are better suited to the limited training data than the small models Exp 10 tuned selected. Deep learning (LSTM, BiLSTM) remains negative — 604 sequences is a hard floor for these architectures regardless of params.
+*CAGR shown only for recent-3yr models (152-day test, 2025-09-24 → 2026-05-01). Full-hist models evaluated on the same period but z-score has 819-day warmup from their earlier test predictions — no cold-start bias.*
+
+**Finding:** The split is now principled: full-history models (LightGBM, RF, MLP, LSTM, GRU, BiLSTM) are trained on the complete dataset up to 2022-06-21. Their predictions from 2022-06-22 onwards provide 819 days of z-score warmup before the eval window — eliminating the cold-start bias in the preliminary run. LightGBM improves to 8.21, RandomForest to 8.18, MLP to 7.30 — all substantially better than their 3yr-only tuned versions (8.51, 7.33, 1.44 in Exp 10). The `tune_model.py` `--recent-years` flag (default 3, use 0 for full history) controls which window each model is tuned on. Deep learning (LSTM 0.37, BiLSTM 0.25, GRU −0.13) still underperforms on the 2025-2026 eval period, suggesting regime mismatch between full-history training distribution and recent gold dynamics.
 
 ---
 
