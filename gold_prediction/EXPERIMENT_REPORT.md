@@ -327,6 +327,18 @@ Use MSE to pick the top-3 model param candidates, then re-evaluate those 3 with 
 
 ---
 
+## Exp 9 — `exp/sharpe-cv` *(in progress)*
+
+**Change:** Replace two-step MSE-then-Sharpe selection with a single joint OOF Sharpe sweep over all params simultaneously. In `tune_sklearn`, `GridSearchCV` (MSE objective) is removed. Instead, for every model param combo the pipeline is cross-validated, OOF predictions collected, and then all (zscore_win × threshold) signal combos are evaluated by OOF Sharpe — in one loop. The winning (model_params, zscore_win, threshold) triple is the one with the best OOF Sharpe across the entire joint grid.
+
+**Fit count** is identical to before (n_model_combos × 5 folds). The signal sweep is arithmetic on already-collected OOF predictions — no extra fits.
+
+**Motivation:** Ridge alpha=1000 was selected by MSE-CV but hurt Sharpe (Exp 8). The new approach cannot make that mistake because Sharpe is the only objective.
+
+*Results to be filled in after tuning completes.*
+
+---
+
 ## Summary
 
 ### SVR_lin Sharpe Ranking (all experiments)
