@@ -1,0 +1,4 @@
+run_timestamp,signal_for_date,signal,confidence_pct,position_size_pct,price_at_signal,price_target_mse,price_target_chg_pct,SVR_lin,Ridge,Lasso,ElasticNet,SVR_rbf,XGBoost,RandomForest,MLP,LSTM,GRU,BiLSTM,actual_price,actual_return_pct,strategy_return_pct
+2026-05-03 16:00:00,2026-05-04,LONG,100.0,95.0,4644.5,4612.6,-0.6896,LONG,LONG,LONG,LONG,LONG,LONG,LONG,LONG,LONG,LONG,LONG,4567.8,0.4464,0.4464
+2026-05-05 00:56:27,2026-05-05,SHORT,10.89,9.9,4547.5,4489.07,-1.285,FLAT,FLAT,FLAT,FLAT,FLAT,FLAT,SHORT,FLAT,SHORT,SHORT,LONG,,,
+2026-05-05 17:40:56,2026-05-06,LONG,11.31,10.23,4567.8,4512.06,-1.2202,FLAT,FLAT,FLAT,FLAT,FLAT,LONG,SHORT,LONG,SHORT,SHORT,LONG,,,
