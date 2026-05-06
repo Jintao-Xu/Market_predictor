@@ -1,0 +1,2 @@
+run_timestamp,signal_for_date,signal,confidence_pct,position_size_pct,price_at_signal,price_target_mse,price_target_chg_pct,SVR_lin,Ridge,Lasso,ElasticNet,SVR_rbf,XGBoost,RandomForest,MLP,LSTM,GRU,BiLSTM,actual_price,actual_return_pct,strategy_return_pct,correct_direction
+2026-05-05 17:30:30,2026-05-06,LONG,32.0,27.26,4567.8,4506.35,-1.3452,LONG,LONG,LONG,LONG,SHORT,LONG,SHORT,SHORT,SHORT,SHORT,SHORT,,,,
