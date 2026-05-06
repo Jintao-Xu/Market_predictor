@@ -110,11 +110,15 @@ def fetch_yf_macro_incremental(ticker, col_name, csv_path):
     fetch_start = (last + datetime.timedelta(days=1)) if last is not None else START_DATE
 
     if last is not None and fetch_start > TODAY:
-        print(f'  {col_name}: already up to date ({last.date()})')
-        s = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-        return s
-
-    print(f'  {col_name}: fetching {fetch_start.date()} → today', end=' ... ')
+        existing = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+        if f'{col_name}_Open' in existing.columns and existing[f'{col_name}_Open'].notna().any():
+            print(f'  {col_name}: already up to date ({last.date()})')
+            return existing
+        # Open column missing from cached CSV — re-fetch full history to add it
+        fetch_start = START_DATE
+        print(f'  {col_name}: re-fetching to add Open column', end=' ... ')
+    else:
+        print(f'  {col_name}: fetching {fetch_start.date()} → today', end=' ... ')
     try:
         raw = yf.download(ticker, start=fetch_start,
                           end=TODAY + datetime.timedelta(days=1),
@@ -125,15 +129,19 @@ def fetch_yf_macro_incremental(ticker, col_name, csv_path):
 
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
-        s = raw[['Close']].copy()
+        cols_to_save = [c for c in ['Open', 'Close'] if c in raw.columns]
+        s = raw[cols_to_save].copy()
         s.index = pd.to_datetime(s.index).normalize()
-        s.columns = [col_name]
-        s.dropna(inplace=True)
+        s.columns = [f'{col_name}_Open' if c == 'Open' else col_name for c in cols_to_save]
+        s.dropna(subset=[col_name], inplace=True)
 
-        if last is not None:
+        if last is not None and fetch_start != START_DATE:
+            # Incremental append: only add rows newer than last cached date
             existing = pd.read_csv(csv_path, index_col=0, parse_dates=True)
             new_rows = s[s.index > last]
             s = pd.concat([existing, new_rows])
+        # If fetch_start == START_DATE (full re-fetch to add Open column), s already
+        # contains the full history — just write it directly without merging old rows.
 
         s = s[~s.index.duplicated(keep='last')].sort_index()
         s.to_csv(csv_path)
@@ -317,7 +325,8 @@ print('\nMerging all sources...')
 gold_df = pd.read_csv(f'{DATA_DIR}/gold_daily.csv', index_col=0, parse_dates=True)
 gold_df.index = pd.to_datetime(gold_df.index).normalize()
 
-df = gold_df[['Gold', 'log_Gold']].copy()
+df = gold_df[['Open', 'Gold', 'log_Gold']].copy()
+df['log_Open'] = np.log(df['Open'])
 
 if cot_gold is not None and len(cot_gold) > 0:
     cot_gold.index = pd.to_datetime(cot_gold.index).normalize()
@@ -329,7 +338,12 @@ for col_name, series in macro_frames.items():
     series.index = pd.to_datetime(series.index).normalize()
     df = df.join(series, how='left')
     df[col_name] = df[col_name].ffill()
-    print(f'  {col_name} joined: {df[col_name].notna().sum()} non-null rows')
+    open_col = f'{col_name}_Open'
+    if open_col in df.columns:
+        df[open_col] = df[open_col].ffill()
+        print(f'  {col_name} (+ Open) joined: {df[col_name].notna().sum()} non-null rows')
+    else:
+        print(f'  {col_name} joined: {df[col_name].notna().sum()} non-null rows')
 
 df.dropna(subset=['Gold'], inplace=True)
 df.to_csv(f'{DATA_DIR}/merged_gold_dataset.csv')

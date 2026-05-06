@@ -38,6 +38,16 @@ from matplotlib.colors import LinearSegmentedColormap
 RESULTS_DIR = 'results'
 MODELS_DIR  = 'saved_models'
 
+# Allow --target close/open to be parsed early so path constants are set
+# before any chart functions are defined (they close over RESULTS_DIR/MODELS_DIR).
+import sys as _sys
+for _i, _a in enumerate(_sys.argv[:-1]):
+    if _a == '--target':
+        _t = _sys.argv[_i + 1]
+        RESULTS_DIR = f'results/{_t}'
+        MODELS_DIR  = f'saved_models/{_t}'
+        break
+
 ALL_CHARTS = ['cv_mse', 'pva_best', 'equity_best',
               'trading_metrics', 'pva_all', 'equity_all',
               'signal_timeline', 'shap_best', 'shap_all', 'bias_tests']
@@ -664,6 +674,8 @@ if __name__ == '__main__':
                         help='Generate only these charts (default: all)')
     parser.add_argument('--dpi', type=int, default=150,
                         help='Output resolution (default: 150)')
+    parser.add_argument('--target', type=str,
+                        help='Subdirectory to plot, e.g. close_3y, open_full, close_full')
     args = parser.parse_args()
 
     to_run = args.only or ALL_CHARTS

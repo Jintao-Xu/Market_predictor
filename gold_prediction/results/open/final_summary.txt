@@ -1,0 +1,12 @@
+Best model:        Ridge
+Features (k):      10 of 63
+FracDiff d:        0.3
+TIMESTEPS:         10  (LSTM=10, GRU=10, BiLSTM=7)
+Test MSE:          0.00037795
+CAGR:              112.26%
+Sharpe Ratio:      2.5259
+Profit Factor:     1.5336
+Max Drawdown:      -16.36%
+WRC p-value:       0.5050
+MC  p-value:       0.0529
+Total runtime:     434s

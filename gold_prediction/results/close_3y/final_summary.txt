@@ -1,0 +1,12 @@
+Best model:        XGB
+Features (k):      61 of 61
+FracDiff d:        0.3
+TIMESTEPS:         5  (LSTM=5, GRU=5, BiLSTM=5)
+Test MSE:          0.00175806
+CAGR:              617.52%
+Sharpe Ratio:      6.5889
+Profit Factor:     3.4590
+Max Drawdown:      -9.42%
+WRC p-value:       0.5060
+MC  p-value:       0.0010
+Total runtime:     244s

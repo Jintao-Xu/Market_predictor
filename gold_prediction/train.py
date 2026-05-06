@@ -72,16 +72,99 @@ from tensorflow.keras.regularizers import l2
 import tensorflow as tf
 tf.random.set_seed(42)
 
+import argparse, tempfile
+_parser = argparse.ArgumentParser(description='Gold price prediction training pipeline')
+_parser.add_argument('--target', choices=['close', 'open', 'both'], default='close',
+                     help='Price target to predict: close, open, or both (runs pipeline twice)')
+_parser.add_argument('--recent-years', type=int, default=3,
+                     help='Restrict training data to last N years (0 = full history since 2006)')
+_parser.add_argument('--models', nargs='+', default=None,
+                     help='Only train these models, e.g. --models MLP LSTM GRU BiLSTM RF LightGBM')
+_parser.add_argument('--_keras-worker', nargs=2, metavar=('MODEL', 'TMPDIR'),
+                     help=argparse.SUPPRESS)   # internal: run CV for one Keras model
+_args = _parser.parse_args()
+PRICE_TARGET   = _args.target
+RECENT_YEARS   = _args.recent_years
+MODELS_FILTER  = [m.upper() for m in _args.models] if _args.models else None
+
+# ── Internal Keras CV worker mode ─────────────────────────────────────────────
+# Launched as a subprocess by the main pipeline to parallelise LSTM/GRU/BiLSTM.
+# Loads X_trainval/y_trainval from TMPDIR, runs timestep-CV, writes results JSON.
+if _args._keras_worker:
+    _kmodel, _tmpdir = _args._keras_worker
+    _Xtv = np.load(os.path.join(_tmpdir, 'Xtv.npy'))
+    _ytv = np.load(os.path.join(_tmpdir, 'ytv.npy'))
+    with open(os.path.join(_tmpdir, 'cv_cfg.json')) as _f:
+        _cfg = json.load(_f)
+    _tscv   = TimeSeriesSplit(n_splits=_cfg['n_folds'])
+    _cands  = _cfg['timestep_cands']
+    _seed   = _cfg['seed']
+    tf.random.set_seed(_seed)
+    _builders = {'LSTM': build_lstm, 'GRU': build_gru, 'BILSTM': build_bilstm}
+    _build_fn = _builders[_kmodel.upper()]
+    _epochs   = {'LSTM': 30, 'GRU': 50, 'BILSTM': 60}[_kmodel.upper()]
+    _patience = {'LSTM': 5,  'GRU': 10, 'BILSTM': 10}[_kmodel.upper()]
+    _ts_res = {}
+    for _ts in _cands:
+        _fmses = []
+        _sc = StandardScaler()
+        for _tr, _va in _tscv.split(_Xtv):
+            _Xtr_s = _sc.fit_transform(_Xtv[_tr]); _Xva_s = _sc.transform(_Xtv[_va])
+            _Xtr_sq, _ytr_sq = make_sequences(_Xtr_s, _ytv[_tr], _ts)
+            _Xva_sq, _yva_sq = make_sequences(_Xva_s, _ytv[_va], _ts)
+            if len(_Xva_sq) == 0: continue
+            _m = _build_fn(units=32, n_features=_Xtv.shape[1], timesteps=_ts)
+            _m.fit(_Xtr_sq, _ytr_sq, epochs=_epochs, batch_size=32, verbose=0,
+                   callbacks=[EarlyStopping(patience=_patience, restore_best_weights=True)])
+            _fmses.append(float(mean_squared_error(_yva_sq, _m.predict(_Xva_sq, verbose=0).flatten())))
+        _ts_res[str(_ts)] = _fmses
+        print(f'  {_kmodel} ts={_ts:>2d}  CV MSE: {np.mean(_fmses):.8f}', flush=True)
+    with open(os.path.join(_tmpdir, f'cv_{_kmodel}.json'), 'w') as _f:
+        json.dump(_ts_res, _f)
+    print(f'  {_kmodel} worker done → {_tmpdir}/cv_{_kmodel}.json', flush=True)
+    sys.exit(0)
+
+if PRICE_TARGET == 'both':
+    import subprocess
+    extra = ['--recent-years', str(RECENT_YEARS)]
+    if MODELS_FILTER:
+        extra += ['--models'] + _args.models
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
+    os.makedirs(log_dir, exist_ok=True)
+    print('=== Launching CLOSE and OPEN pipelines in parallel ===')
+    procs = {}
+    for t in ['close', 'open']:
+        log_path = os.path.join(log_dir, f'train_{t}.log')
+        log_f = open(log_path, 'w')
+        p = subprocess.Popen([sys.executable, __file__, '--target', t] + extra,
+                             stdout=log_f, stderr=log_f)
+        procs[t] = (p, log_f, log_path)
+        print(f'  {t}: PID {p.pid}  → {log_path}')
+    print('  Waiting for both to finish...')
+    failed = []
+    for t, (p, log_f, log_path) in procs.items():
+        ret = p.wait()
+        log_f.close()
+        if ret != 0:
+            failed.append(t)
+            print(f'  {t}: FAILED (exit {ret}) — see {log_path}')
+        else:
+            print(f'  {t}: done')
+    if failed:
+        sys.exit(f'ERROR: pipelines failed: {failed}')
+    sys.exit(0)
+
 # ── Config ────────────────────────────────────────────────────────────────────
 SEED               = 42
 DATA_DIR           = 'data'
-RESULTS_DIR        = 'results'
-MODELS_DIR         = 'saved_models'
+_history_suffix    = 'full' if RECENT_YEARS == 0 else f'{RECENT_YEARS}y'
+_price_suffix      = f'{PRICE_TARGET}_{_history_suffix}'
+RESULTS_DIR        = f'results/{_price_suffix}'
+MODELS_DIR         = f'saved_models/{_price_suffix}'
 TIMESTEPS_CANDS    = [5, 7, 10, 15]   # daily data benefits from more context
 N_CV_FOLDS         = 5
 N_JOBS             = -1   # -1 = all cores
 ZSCORE_WIN = 10   # rolling window for z-score signal — must match predict_tomorrow.py
-RECENT_YEARS       = 3    # restrict data to last N years after feature engineering
 np.random.seed(SEED)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR,  exist_ok=True)
@@ -147,21 +230,42 @@ def frac_diff(series, d, window=252, threshold=1e-5):
 # a few rows' difference, so this is precise enough for hyperparameter selection.
 _split_raw = int(len(df) * 0.80)
 
-adf_test(df['log_Gold'].iloc[:_split_raw], 'log(Gold) [train]')
+# Determine price column based on target
+if PRICE_TARGET == 'open':
+    PRICE_COL = 'Open'
+    LOG_PRICE_COL = 'log_Open'
+    FRAC_TARGET_COL = 'frac_diff_log_Open'
+else:
+    PRICE_COL = 'Gold'
+    LOG_PRICE_COL = 'log_Gold'
+    FRAC_TARGET_COL = 'frac_diff_log_Gold'
+
+# Verify column exists
+if LOG_PRICE_COL not in df.columns:
+    if PRICE_COL in df.columns:
+        df[LOG_PRICE_COL] = np.log(df[PRICE_COL])
+    else:
+        sys.exit(f'ERROR: {PRICE_COL} column not found in dataset. Run download_data.py first.')
+
+adf_test(df[LOG_PRICE_COL].iloc[:_split_raw], f'log({PRICE_COL}) [train]')
 
 FRAC_D = None
 for d in [0.3, 0.4, 0.5, 0.6, 0.7]:
-    fd = frac_diff(df['log_Gold'], d=d)
-    if adf_test(fd.iloc[:_split_raw].dropna(), f'FracDiff(log_Gold, d={d}) [train]'):
-        df['frac_diff_log_Gold'] = fd
+    fd = frac_diff(df[LOG_PRICE_COL], d=d)
+    if adf_test(fd.iloc[:_split_raw].dropna(), f'FracDiff(log_{PRICE_COL}, d={d}) [train]'):
+        df[FRAC_TARGET_COL] = fd
         FRAC_D = d
         break
 if FRAC_D is None:
     FRAC_D = 0.7
-    df['frac_diff_log_Gold'] = frac_diff(df['log_Gold'], d=FRAC_D)
+    df[FRAC_TARGET_COL] = frac_diff(df[LOG_PRICE_COL], d=FRAC_D)
 
-TARGET = 'frac_diff_log_Gold'
+TARGET = FRAC_TARGET_COL
 print(f'  → TARGET = "{TARGET}"  (d={FRAC_D})')
+
+# Also compute frac_diff_log_Gold for lag features if not already done (always needed for features)
+if 'frac_diff_log_Gold' not in df.columns:
+    df['frac_diff_log_Gold'] = frac_diff(df['log_Gold'], d=FRAC_D)
 
 # Fractionally difference non-stationary COT series (ADF on train portion only)
 if HAS_COT:
@@ -215,6 +319,12 @@ if 'VIX' in df.columns:
     vr = df['VIX'].rolling(60)
     df['VIX_zscore'] = (df['VIX'] - vr.mean()) / vr.std()
 
+# Open price macro features (if available)
+for _mc, _mc_open in [('DXY', 'DXY_Open'), ('VIX', 'VIX_Open'),
+                       ('TNX_yield', 'TNX_yield_Open'), ('TYX_yield', 'TYX_yield_Open')]:
+    if _mc_open in df.columns and _mc in df.columns:
+        df[f'{_mc}_overnight'] = (df[_mc_open] - df[_mc].shift(1))  # open vs prev close
+
 # Technical features
 close = df['Gold'].values.astype(float)
 if TALIB_AVAILABLE:
@@ -264,13 +374,20 @@ if HAS_COT:
     df['net_spec_chg_20d'] = df['net_speculator'].diff(20)
     df['net_comm_chg_20d'] = df['net_commercial'].diff(20)
 
+# Open price technical features (if predicting Open)
+if PRICE_TARGET == 'open' and 'Open' in df.columns:
+    df['open_vs_prev_close'] = df['Open'] / df['Gold'].shift(1) - 1  # gap up/down
+    df['open_close_ratio'] = df['Open'] / df['Gold']  # intraday positioning
+
 df.dropna(inplace=True)
 
-# Restrict to most recent N years (computed on full dataset for rolling warmup,
-# but only the recent window is used for training and testing)
-_recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
-df = df[df.index >= _recent_start].copy()
-print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
+# Optionally restrict to most recent N years (rolling warmup uses full history above)
+if RECENT_YEARS > 0:
+    _recent_start = df.index[-1] - pd.DateOffset(years=RECENT_YEARS)
+    df = df[df.index >= _recent_start].copy()
+    print(f'  Restricted to last {RECENT_YEARS} years: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
+else:
+    print(f'  Using full history: {df.index[0].date()} → {df.index[-1].date()} ({len(df)} rows)')
 
 print(f'  Feature matrix: {df.shape[0]} rows × {df.shape[1]} cols')
 _elapsed('3. Feature engineering', t0)
@@ -305,9 +422,13 @@ _lag_feats      = [f'target_lag{l}' for l in [1, 2, 3, 5, 10]]
 _momentum_feats = [f'gold_ret_{p}d' for p in [21, 63, 126, 252]]
 _month_feats    = [f'month_{m}' for m in range(1, 13)]
 _cot20_feats    = (['net_spec_chg_20d', 'net_comm_chg_20d'] if HAS_COT else [])
+_open_macro_feats = [f for f in ['DXY_overnight', 'VIX_overnight',
+                                  'TNX_yield_overnight', 'TYX_yield_overnight',
+                                  'open_vs_prev_close', 'open_close_ratio']
+                     if f in df.columns]
 
 FEATURE_COLS = [c for c in (_cot_feats + _macro_feats + _ta_feats + _lag_feats
-                             + _momentum_feats + _month_feats + _cot20_feats)
+                             + _momentum_feats + _month_feats + _cot20_feats + _open_macro_feats)
                 if c in df.columns]
 assert TARGET not in FEATURE_COLS, 'LEAKAGE!'
 
@@ -406,6 +527,17 @@ SK_MODELS['ElasticNet'] = ElasticNet(alpha=0.01, l1_ratio=0.5, max_iter=5000)
 if LIGHTGBM_AVAILABLE:
     SK_MODELS['LightGBM'] = lgb.LGBMRegressor(n_estimators=200, random_state=SEED, verbose=-1)
 
+# Apply model filter (--models arg). Map friendly names → SK_MODELS keys.
+_NAME_MAP = {'RF': 'RF', 'RANDOMFOREST': 'RF', 'XGB': 'XGB', 'XGBOOST': 'XGB',
+             'SVR_LIN': 'SVR_lin', 'SVR_RBF': 'SVR_rbf', 'LIGHTGBM': 'LightGBM'}
+if MODELS_FILTER:
+    _sk_keep = {k for m in MODELS_FILTER
+                for k in [_NAME_MAP.get(m, m)]
+                if k in SK_MODELS}
+    SK_MODELS = {k: v for k, v in SK_MODELS.items() if k in _sk_keep}
+    print(f'  Model filter active — sklearn: {list(SK_MODELS.keys())}')
+    print(f'                        keras  : {[m for m in MODELS_FILTER if m in ("LSTM","GRU","BILSTM")]}')
+
 def _cv_one_fold(model_name, model, X_tr, y_tr, X_va, y_va):
     """Fit one model on one fold. Returns (model_name, mse).
     loky backend pickles a fresh copy into each subprocess — no manual copy needed."""
@@ -431,88 +563,70 @@ for name in SK_MODELS:
 _elapsed('5a. sklearn CV Loop 1', t0)
 
 # ── LSTM: loop over TIMESTEPS_CANDIDATES (TF uses its own parallelism) ────────
-print(f'\n  LSTM — searching timesteps {TIMESTEPS_CANDS}...')
-t0_lstm = time.time()
-lstm_ts_results = {}
+# ── LSTM / GRU / BiLSTM: run all three in parallel as subprocesses ────────────
+t0_keras = time.time()
+_keras_models = [m for m in ['LSTM', 'GRU', 'BiLSTM']
+                 if not (MODELS_FILTER and m.upper() not in MODELS_FILTER)]
 
-for ts in TIMESTEPS_CANDS:
-    fold_mses = []
-    sc = StandardScaler()
-    for tr, va in tscv.split(X_trainval):
-        X_tr_s = sc.fit_transform(X_trainval[tr])
-        X_va_s = sc.transform(X_trainval[va])
-        Xtr_sq, ytr_sq = make_sequences(X_tr_s, y_trainval[tr], ts)
-        Xva_sq, yva_sq = make_sequences(X_va_s, y_trainval[va], ts)
-        if len(Xva_sq) == 0:
-            continue
-        m = build_lstm(units=32, n_features=X_trainval.shape[1], timesteps=ts)
-        m.fit(Xtr_sq, ytr_sq, epochs=30, batch_size=32, verbose=0,
-              callbacks=[EarlyStopping(patience=5, restore_best_weights=True)])
-        fold_mses.append(mean_squared_error(yva_sq, m.predict(Xva_sq, verbose=0).flatten()))
-    lstm_ts_results[ts] = fold_mses
-    print(f'    LSTM ts={ts:>2d}  CV MSE: {np.mean(fold_mses):.8f}')
+if _keras_models:
+    import subprocess as _sp
+    _tmpdir = tempfile.mkdtemp(prefix='gold_keras_cv_')
+    np.save(os.path.join(_tmpdir, 'Xtv.npy'), X_trainval)
+    np.save(os.path.join(_tmpdir, 'ytv.npy'), y_trainval)
+    with open(os.path.join(_tmpdir, 'cv_cfg.json'), 'w') as _f:
+        json.dump({'n_folds': N_CV_FOLDS, 'timestep_cands': TIMESTEPS_CANDS, 'seed': SEED}, _f)
 
-LSTM_BEST_TS = min(lstm_ts_results, key=lambda t: np.mean(lstm_ts_results[t]))
-results['LSTM'] = lstm_ts_results[LSTM_BEST_TS]
-print(f'  {"LSTM":<22} best_ts={LSTM_BEST_TS}  CV MSE: {np.mean(results["LSTM"]):.8f}')
-_elapsed('5b. LSTM CV Loop 1', t0_lstm)
+    print(f'\n  Launching {_keras_models} CV workers in parallel → {_tmpdir}')
+    _kprocs = {}
+    for _km in _keras_models:
+        _log = open(os.path.join(_tmpdir, f'{_km}.log'), 'w')
+        _p = _sp.Popen([sys.executable, __file__,
+                        '--target', PRICE_TARGET,
+                        '--_keras-worker', _km.upper(), _tmpdir],
+                       stdout=_log, stderr=_log)
+        _kprocs[_km] = (_p, _log)
+        print(f'    {_km}: PID {_p.pid}')
 
-# ── GRU ───────────────────────────────────────────────────────────────────────
-print(f'\n  GRU — searching timesteps {TIMESTEPS_CANDS}...')
-t0_gru = time.time()
-gru_ts_results = {}
+    for _km, (_p, _log) in _kprocs.items():
+        _p.wait(); _log.close()
+        if _p.returncode != 0:
+            print(f'    {_km}: FAILED (exit {_p.returncode})')
+        else:
+            print(f'    {_km}: done')
+else:
+    _tmpdir = None
 
-for ts in TIMESTEPS_CANDS:
-    fold_mses = []
-    sc = StandardScaler()
-    for tr, va in tscv.split(X_trainval):
-        X_tr_s = sc.fit_transform(X_trainval[tr])
-        X_va_s = sc.transform(X_trainval[va])
-        Xtr_sq, ytr_sq = make_sequences(X_tr_s, y_trainval[tr], ts)
-        Xva_sq, yva_sq = make_sequences(X_va_s, y_trainval[va], ts)
-        if len(Xva_sq) == 0:
-            continue
-        m = build_gru(units=32, n_features=X_trainval.shape[1], timesteps=ts)
-        m.fit(Xtr_sq, ytr_sq, epochs=50, batch_size=32, verbose=0,
-              callbacks=[EarlyStopping(patience=10, restore_best_weights=True)])
-        fold_mses.append(mean_squared_error(yva_sq, m.predict(Xva_sq, verbose=0).flatten()))
-    gru_ts_results[ts] = fold_mses
-    print(f'    GRU ts={ts:>2d}  CV MSE: {np.mean(fold_mses):.8f}')
+# Load results from worker temp files
+def _load_keras_cv(model_name, tmpdir, fallback_ts):
+    path = os.path.join(tmpdir, f'cv_{model_name.upper()}.json') if tmpdir else None
+    if path and os.path.exists(path):
+        with open(path) as _f:
+            raw = json.load(_f)
+        return {int(k): v for k, v in raw.items()}
+    return {}
 
-GRU_BEST_TS = min(gru_ts_results, key=lambda t: np.mean(gru_ts_results[t]))
-results['GRU'] = gru_ts_results[GRU_BEST_TS]
-print(f'  {"GRU":<22} best_ts={GRU_BEST_TS}  CV MSE: {np.mean(results["GRU"]):.8f}')
-_elapsed('5c. GRU CV Loop 1', t0_gru)
+lstm_ts_results   = _load_keras_cv('LSTM',   _tmpdir, TIMESTEPS_CANDS[0])
+gru_ts_results    = _load_keras_cv('GRU',    _tmpdir, TIMESTEPS_CANDS[0])
+bilstm_ts_results = _load_keras_cv('BILSTM', _tmpdir, TIMESTEPS_CANDS[0])
 
-# ── BiLSTM ────────────────────────────────────────────────────────────────────
-print(f'\n  BiLSTM — searching timesteps {TIMESTEPS_CANDS}...')
-t0_bi = time.time()
-bilstm_ts_results = {}
+LSTM_BEST_TS   = min(lstm_ts_results,   key=lambda t: np.mean(lstm_ts_results[t]))   if lstm_ts_results   else TIMESTEPS_CANDS[0]
+GRU_BEST_TS    = min(gru_ts_results,    key=lambda t: np.mean(gru_ts_results[t]))    if gru_ts_results    else TIMESTEPS_CANDS[0]
+BILSTM_BEST_TS = min(bilstm_ts_results, key=lambda t: np.mean(bilstm_ts_results[t])) if bilstm_ts_results else TIMESTEPS_CANDS[0]
 
-for ts in TIMESTEPS_CANDS:
-    fold_mses = []
-    sc = StandardScaler()
-    for tr, va in tscv.split(X_trainval):
-        X_tr_s = sc.fit_transform(X_trainval[tr])
-        X_va_s = sc.transform(X_trainval[va])
-        Xtr_sq, ytr_sq = make_sequences(X_tr_s, y_trainval[tr], ts)
-        Xva_sq, yva_sq = make_sequences(X_va_s, y_trainval[va], ts)
-        if len(Xva_sq) == 0:
-            continue
-        m = build_bilstm(units=32, n_features=X_trainval.shape[1], timesteps=ts)
-        m.fit(Xtr_sq, ytr_sq, epochs=60, batch_size=32, verbose=0,
-              callbacks=[EarlyStopping(patience=10, restore_best_weights=True)])
-        fold_mses.append(mean_squared_error(yva_sq, m.predict(Xva_sq, verbose=0).flatten()))
-    bilstm_ts_results[ts] = fold_mses
-    print(f'    BiLSTM ts={ts:>2d}  CV MSE: {np.mean(fold_mses):.8f}')
+results['LSTM']   = lstm_ts_results.get(LSTM_BEST_TS,     [1e9])
+results['GRU']    = gru_ts_results.get(GRU_BEST_TS,       [1e9])
+results['BiLSTM'] = bilstm_ts_results.get(BILSTM_BEST_TS, [1e9])
 
-BILSTM_BEST_TS = min(bilstm_ts_results, key=lambda t: np.mean(bilstm_ts_results[t]))
-results['BiLSTM'] = bilstm_ts_results[BILSTM_BEST_TS]
-print(f'  {"BiLSTM":<22} best_ts={BILSTM_BEST_TS}  CV MSE: {np.mean(results["BiLSTM"]):.8f}')
-_elapsed('5d. BiLSTM CV Loop 1', t0_bi)
+for _km, _bts, _res in [('LSTM', LSTM_BEST_TS, results['LSTM']),
+                         ('GRU',  GRU_BEST_TS,  results['GRU']),
+                         ('BiLSTM', BILSTM_BEST_TS, results['BiLSTM'])]:
+    print(f'  {_km:<22} best_ts={_bts}  CV MSE: {np.mean(_res):.8f}')
+
+_elapsed('5b-d. Keras CV Loop 1 (parallel)', t0_keras)
 
 # ── ARIMAX ────────────────────────────────────────────────────────────────────
-if PMDARIMA_AVAILABLE:
+_run_arimax = not (MODELS_FILTER and 'ARIMAX' not in MODELS_FILTER)
+if PMDARIMA_AVAILABLE and _run_arimax:
     t0_arima = time.time()
     print('\n  ARIMAX CV...')
     arimax_mses = []
@@ -872,46 +986,76 @@ _sc  = StandardScaler()
 _Xtv = _sc.fit_transform(X_trainval)
 _Xte = _sc.transform(X_test)
 
-# ── Dedicated SVR tuning (always runs, independent of best model) ─────────────
-print('\n── 9a. SVR HYPERPARAMETER TUNING ────────────────────────────────────────')
-t0_svr = time.time()
-_tscv_svr = TimeSeriesSplit(n_splits=N_CV_FOLDS)
+# ── All-model hyperparameter tuning ──────────────────────────────────────────
+print('\n── 9a. ALL-MODEL HYPERPARAMETER TUNING ──────────────────────────────────')
+t0_tune = time.time()
+_tune_tscv = TimeSeriesSplit(n_splits=N_CV_FOLDS)
 
-# SVR_lin: tune C (epsilon fixed at SVR_EPSILON)
-_svr_lin_grid = GridSearchCV(
-    Pipeline([('sc', StandardScaler()),
-              ('m',  LinearSVR(epsilon=SVR_EPSILON, max_iter=10000, dual=True))]),
-    param_grid={'m__C': [0.1, 1, 10, 100, 1000]},
-    cv=_tscv_svr, scoring='neg_mean_squared_error', n_jobs=N_JOBS, refit=True)
-_svr_lin_grid.fit(X_trainval, y_trainval)
-SVR_LIN_BEST_C = _svr_lin_grid.best_params_['m__C']
-SVR_LIN_BEST_MSE = -_svr_lin_grid.best_score_
-print(f'  SVR_lin best: C={SVR_LIN_BEST_C}  CV MSE={SVR_LIN_BEST_MSE:.8f}')
+_tune_specs = [
+    ('Ridge',        Ridge(),
+     {'model__alpha': [1e-4, 1e-3, 0.01, 0.1, 1.0, 10.0, 100.0]}),
+    ('Lasso',        Lasso(max_iter=10000),
+     {'model__alpha': [1e-5, 1e-4, 1e-3, 0.01, 0.1, 1.0]}),
+    ('SVR_lin',      LinearSVR(epsilon=SVR_EPSILON, max_iter=10000, dual=True),
+     {'model__C': [0.01, 0.1, 1, 10, 100, 500, 1000]}),
+    ('SVR_rbf',      SVR(kernel='rbf', epsilon=SVR_EPSILON),
+     {'model__C':    [0.01, 0.1, 1, 10, 100],
+      'model__gamma': ['scale', 0.001, 0.01, 0.1]}),
+    ('XGBoost',      xgb.XGBRegressor(random_state=SEED, verbosity=0),
+     {'model__n_estimators': [100, 200, 400],
+      'model__max_depth':    [2, 3, 5],
+      'model__learning_rate': [0.01, 0.05, 0.1],
+      'model__subsample':    [0.8, 1.0]}),
+    ('RandomForest', RandomForestRegressor(random_state=SEED),
+     {'model__n_estimators': [100, 200, 400],
+      'model__max_depth':    [3, 5, None],
+      'model__min_samples_leaf': [1, 3, 5]}),
+]
 
-# SVR_rbf: tune C and gamma (epsilon fixed at SVR_EPSILON)
-_svr_rbf_grid = GridSearchCV(
-    Pipeline([('sc', StandardScaler()),
-              ('m',  SVR(kernel='rbf', epsilon=SVR_EPSILON))]),
-    param_grid={'m__C':     [0.01, 0.1, 1, 10, 100],
-                'm__gamma': ['scale', 0.001, 0.01, 0.1]},
-    cv=_tscv_svr, scoring='neg_mean_squared_error', n_jobs=N_JOBS, refit=True)
-_svr_rbf_grid.fit(X_trainval, y_trainval)
-SVR_RBF_BEST_C     = _svr_rbf_grid.best_params_['m__C']
-SVR_RBF_BEST_GAMMA = _svr_rbf_grid.best_params_['m__gamma']
-SVR_RBF_BEST_MSE   = -_svr_rbf_grid.best_score_
-print(f'  SVR_rbf best: C={SVR_RBF_BEST_C}  gamma={SVR_RBF_BEST_GAMMA}  CV MSE={SVR_RBF_BEST_MSE:.8f}')
-_elapsed('9a. SVR tuning', t0_svr)
+if MODELS_FILTER:
+    _tune_specs = [(n, m, g) for n, m, g in _tune_specs
+                   if _NAME_MAP.get(n.upper(), n.upper()) in MODELS_FILTER
+                   or n.upper() in MODELS_FILTER]
 
-ALL_SK = {
-    'Ridge':        Ridge(alpha=best_params.get('alpha', 0.01) if BEST_MODEL_NAME=='Ridge' else 0.01),
-    'Lasso':        Lasso(alpha=0.001),
-    'SVR_lin':      LinearSVR(C=SVR_LIN_BEST_C, epsilon=SVR_EPSILON, max_iter=10000, dual=True),
-    'SVR_rbf':      SVR(kernel='rbf', C=SVR_RBF_BEST_C, epsilon=SVR_EPSILON, gamma=SVR_RBF_BEST_GAMMA),
-    'XGBoost':      xgb.XGBRegressor(n_estimators=100, max_depth=3,
-                                      learning_rate=0.05, random_state=SEED, verbosity=0),
-    'RandomForest': RandomForestRegressor(n_estimators=100, random_state=SEED),
-    'MLP':          MLPRegressor(hidden_layer_sizes=(64,32), max_iter=500, random_state=SEED),
-}
+_tuned_params = {}
+for _tname, _tbase, _tgrid in _tune_specs:
+    _pipe = Pipeline([('sc', StandardScaler()), ('model', _tbase)])
+    _gs   = GridSearchCV(_pipe, _tgrid, cv=_tune_tscv,
+                         scoring='neg_mean_squared_error', n_jobs=N_JOBS, refit=False)
+    _gs.fit(X_trainval, y_trainval)
+    _tuned_params[_tname] = {k.replace('model__', ''): v
+                              for k, v in _gs.best_params_.items()}
+    print(f'  {_tname:<22} best={_tuned_params[_tname]}  CV MSE={-_gs.best_score_:.8f}')
+
+_elapsed('9a. All-model tuning', t0_tune)
+
+def _build_all_sk(name, p):
+    if name == 'Ridge':
+        return Ridge(alpha=p.get('alpha', 1.0))
+    if name == 'Lasso':
+        return Lasso(alpha=p.get('alpha', 0.001), max_iter=10000)
+    if name == 'SVR_lin':
+        return LinearSVR(C=p.get('C', 100), epsilon=SVR_EPSILON, max_iter=10000, dual=True)
+    if name == 'SVR_rbf':
+        return SVR(kernel='rbf', C=p.get('C', 1), epsilon=SVR_EPSILON,
+                   gamma=p.get('gamma', 'scale'))
+    if name == 'XGBoost':
+        return xgb.XGBRegressor(n_estimators=p.get('n_estimators', 100),
+                                 max_depth=p.get('max_depth', 3),
+                                 learning_rate=p.get('learning_rate', 0.05),
+                                 subsample=p.get('subsample', 1.0),
+                                 random_state=SEED, verbosity=0)
+    if name == 'RandomForest':
+        return RandomForestRegressor(n_estimators=p.get('n_estimators', 100),
+                                     max_depth=p.get('max_depth', None),
+                                     min_samples_leaf=p.get('min_samples_leaf', 1),
+                                     random_state=SEED)
+    if name == 'MLP':
+        return MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=SEED)
+    return Ridge()
+
+ALL_SK = {name: _build_all_sk(name, _tuned_params.get(name, {}))
+          for name in ['Ridge', 'Lasso', 'SVR_lin', 'SVR_rbf', 'XGBoost', 'RandomForest', 'MLP']}
 
 def _fit_predict(name, model, Xtv, Xte):
     model.fit(Xtv, y_trainval)
@@ -1018,7 +1162,7 @@ else:
 joblib.dump(final_scaler, f'{MODELS_DIR}/final_scaler.joblib')
 joblib.dump(_sc,          f'{MODELS_DIR}/all_models_scaler.joblib')
 
-for name, model in ALL_SK.items():
+for name, model in sk_fitted_models.items():
     joblib.dump(model, f'{MODELS_DIR}/model_{name}.joblib')
 
 _lstm2.save(f'{MODELS_DIR}/model_LSTM.keras')
@@ -1027,6 +1171,8 @@ _bilstm2.save(f'{MODELS_DIR}/model_BiLSTM.keras')
 
 meta = {
     'target':             TARGET,
+    'price_target':       PRICE_TARGET,
+    'price_col':          PRICE_COL,
     'frac_d':             FRAC_D,
     'best_model':         BEST_MODEL_NAME,
     'best_params':        {k: (int(v) if isinstance(v, (np.integer,)) else
@@ -1049,9 +1195,9 @@ meta = {
     'profit_factor':      float(pf_s),
     'max_drawdown':       float(mdd_s),
     'svr_epsilon':        float(SVR_EPSILON),
-    'svr_lin_best_C':     float(SVR_LIN_BEST_C),
-    'svr_rbf_best_C':     float(SVR_RBF_BEST_C),
-    'svr_rbf_best_gamma': str(SVR_RBF_BEST_GAMMA),
+    'tuned_params':       {n: {k: (float(v) if isinstance(v, (int, float, np.floating)) else str(v))
+                               for k, v in p.items()}
+                           for n, p in _tuned_params.items()},
 }
 with open(f'{MODELS_DIR}/model_metadata.json', 'w') as f:
     json.dump(meta, f, indent=2)
@@ -1240,3 +1386,4 @@ with open(f'{RESULTS_DIR}/final_summary.txt', 'w') as f:
 
 print(f'\n  Results → {RESULTS_DIR}/')
 print(f'  Models  → {MODELS_DIR}/')
+print(f'\n  Price target trained: {PRICE_TARGET.upper()} ({TARGET})')
